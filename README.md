@@ -7,14 +7,23 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 
 | Bereich | Funktion |
 |---|---|
-| **Woche** | Alle Räume mit Aufgabenliste, Wochenwechsel (‹ / ›), Aufgaben abhaken, Notizen pro Raum, „Alles erledigt“ |
-| **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, Versatz je Raum, automatische Verteilung, Mitglieder & Räume verwalten |
+| **Woche** | Alle Räume mit Aufgabenliste, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Notizen pro Raum, „Alles erledigt“ |
+| **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, feste oder wechselnde Raumzuordnung, automatische Verteilung, Aufgaben & Räume verwalten |
 | **Statistik** | Punkte pro Person, erledigte Aufgaben, Aktivität der letzten 8 Wochen, Zustand je Raum |
 | **Mehr** | WG-Name, Hell/Dunkel, Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
 
 ### Aufgaben und Turnus
 
 * Jeder Raum hat eigene Aufgaben mit **Frequenz** (wöchentlich, alle 2 Wochen, monatlich) und **Punkten**.
+* **Aufgaben erstellen und bearbeiten:** Im Tab *Turnus → Räume* jede Aufgabe antippen (oder den Stift
+  in der Wochenansicht) – Raum, Titel, Frequenz und Punkte lassen sich dort ändern, Aufgaben können
+  in einen anderen Raum verschoben oder gelöscht werden.
+* **Punkte 1–4:** Beim Anlegen und Bearbeiten einer Aufgabe wählbar – 1 Punkt für „Geschirr abwaschen“,
+  4 Punkte für „Bad komplett putzen“. Die Punkte zählen in die Statistik der Person, die die Aufgabe
+  erledigt hat.
+* **Feste oder wechselnde Zuordnung:** Je Raum wählbar. *Wechselnd* verteilt den Raum im Turnus auf
+  alle Mitglieder, *Fest* bedeutet „diese Person immer“ (z. B. Person A immer Küche, Person B immer Bad).
+  Die Einstellung steht unter *Turnus → Wochen → Raumzuordnung*.
 * Der **Versatz je Raum** verschiebt, wer zuerst dran ist – so ist die Last gleichmäßig verteilt.
 * „⚖️ Automatisch verteilen“ verteilt die Räume nach Aufgabenmenge auf die Mitglieder.
 * Wer etwas erledigt, wird gebucht – entweder automatisch (aktive Person) oder per Tap auf eine

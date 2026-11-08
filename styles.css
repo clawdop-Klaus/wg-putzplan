@@ -380,3 +380,69 @@ html[data-theme="dark"] html[data-theme="auto"][data-os="dark"] .pill--warn{back
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001ms !important;transition-duration:.001ms !important}
 }
+
+/* =========================================================
+   Aufgaben-Verwaltung (Räume-Tab) & Punkte-Auswahl
+   ========================================================= */
+.roomblock{
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  margin-bottom:12px;overflow:hidden;background:var(--surface-2);
+}
+.roomblock .row{margin:0;padding:10px 12px;background:var(--surface);border-bottom:1px solid var(--line)}
+.roomblock .room__icon{width:34px;height:34px;border-radius:11px;font-size:17px}
+
+.taskrow{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:10px 12px;border:0;background:transparent;border-bottom:1px solid var(--line);
+  cursor:pointer;
+}
+.taskrow:active{background:var(--surface-3)}
+.taskrow:last-of-type{border-bottom:0}
+.taskrow__title{flex:1;min-width:0;font-size:14.5px;font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.taskrow__meta{font-size:11.5px;color:var(--muted);flex-shrink:0}
+.taskrow__pts{
+  font-size:11.5px;font-weight:750;color:var(--accent);
+  background:var(--accent-soft);border-radius:8px;padding:3px 8px;flex-shrink:0;
+}
+.taskrow__pen{font-size:13px;color:var(--muted);opacity:.7;flex-shrink:0}
+.taskrow--empty{padding:12px;font-size:13px;color:var(--muted);justify-content:center;display:flex}
+.taskrow__add{
+  border:0;border-top:1px dashed var(--line);border-radius:0;
+  color:var(--accent);font-weight:650;background:var(--surface);
+}
+
+/* Punkte-Auswahl */
+.points{display:flex;gap:8px}
+.points__btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1px;padding:11px 4px;border-radius:14px;cursor:pointer;
+  border:2px solid var(--line);background:var(--surface-2);color:var(--muted);
+}
+.points__btn strong{font-size:19px;font-weight:800;line-height:1}
+.points__btn span{font-size:10.5px;font-weight:650}
+.points__btn.is-active{
+  background:var(--accent-soft);border-color:var(--accent);color:var(--accent);
+}
+
+/* feste Zuordnung */
+.fixedpick{
+  display:flex;flex-wrap:wrap;gap:7px;padding:0 0 12px;
+}
+.roommode .segmented--sm{margin-right:2px}
+.segmented--sm{padding:3px;border-radius:11px}
+.segmented--sm button{padding:6px 10px;font-size:12px;border-radius:9px}
+.fixedpick .chip{font-size:12.5px;padding:5px 10px 5px 6px}
+.roommode{flex-wrap:wrap}
+.roommode .row__actions{flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:430px){
+  .roommode .row__actions{width:100%}
+}
+
+
+.task__edit{
+  width:28px;height:28px;flex-shrink:0;border-radius:9px;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--muted);
+  font-size:12px;line-height:1;cursor:pointer;display:grid;place-items:center;
+}
+.task__edit:active{transform:scale(.92)}

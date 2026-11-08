@@ -32,7 +32,7 @@
     ];
     const rooms = [
       {
-        id: 'r1', name: 'Küche', icon: '🍳', color: MEMBER_COLORS[0], tasks: [
+        id: 'r1', name: 'Küche', icon: '🍳', color: MEMBER_COLORS[0], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't1', title: 'Geschirr abwaschen & einräumen', p: 1, freq: 'w' },
           { id: 't2', title: 'Arbeitsfläche & Herd abwischen', p: 1, freq: 'w' },
           { id: 't3', title: 'Spüle & Wasserhahn reinigen', p: 1, freq: '2w' },
@@ -41,7 +41,7 @@
         ]
       },
       {
-        id: 'r2', name: 'Bad', icon: '🚿', color: MEMBER_COLORS[1], tasks: [
+        id: 'r2', name: 'Bad', icon: '🚿', color: MEMBER_COLORS[1], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't6', title: 'Bad & Spiegel putzen', p: 1, freq: 'w' },
           { id: 't7', title: 'Toilette reinigen', p: 1, freq: 'w' },
           { id: 't8', title: 'Handtücher wechseln', p: 1, freq: '2w' },
@@ -49,14 +49,14 @@
         ]
       },
       {
-        id: 'r3', name: 'Flur & Wohnzimmer', icon: '🛋️', color: MEMBER_COLORS[2], tasks: [
+        id: 'r3', name: 'Flur & Wohnzimmer', icon: '🛋️', color: MEMBER_COLORS[2], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't10', title: 'Staubsaugen', p: 1, freq: 'w' },
           { id: 't11', title: 'Flur wischen', p: 1, freq: '2w' },
           { id: 't12', title: 'Sofa & Polster abstauben', p: 2, freq: 'm' }
         ]
       },
       {
-        id: 'r4', name: 'Müll & Recycling', icon: '🗑️', color: MEMBER_COLORS[3], tasks: [
+        id: 'r4', name: 'Müll & Recycling', icon: '🗑️', color: MEMBER_COLORS[3], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't13', title: 'Mülltonnen rausbringen', p: 1, freq: 'w' },
           { id: 't14', title: 'Altpapier & Glas trennen', p: 1, freq: '2w' },
           { id: 't15', title: 'Pfandflaschen wegbringen', p: 2, freq: 'm' }
@@ -98,7 +98,16 @@
     s.members.forEach((m) => { if (!s.order.includes(m.id)) s.order.push(m.id); });
     if (!s.members.some((m) => m.id === s.currentUser)) s.currentUser = s.members[0] ? s.members[0].id : null;
     if (!s.theme) s.theme = 'auto';
-    s.rooms.forEach((r) => { r.tasks = Array.isArray(r.tasks) ? r.tasks : []; r.tasks.forEach((t) => { if (!t.freq) t.freq = 'w'; if (!t.p) t.p = 1; }); });
+    s.rooms.forEach((r) => {
+      r.tasks = Array.isArray(r.tasks) ? r.tasks : [];
+      r.mode = r.mode === 'fixed' ? 'fixed' : 'rotation';
+      if (!r.fixedMember || !s.members.some((m) => m.id === r.fixedMember)) r.fixedMember = null;
+      if (r.mode === 'fixed' && !r.fixedMember) r.mode = 'rotation';
+      r.tasks.forEach((t) => {
+        if (!t.freq) t.freq = 'w';
+        t.p = clampPoints(t.p);
+      });
+    });
     return s;
   }
 
@@ -164,6 +173,11 @@
   const activeOrder = () => state.order.filter((id) => !!member(id));
 
   function assigneeFor(roomId, idx) {
+    const r = room(roomId);
+    // Feste Zuordnung: immer dieselbe Person
+    if (r && r.mode === 'fixed') {
+      if (r.fixedMember && member(r.fixedMember)) return r.fixedMember;
+    }
     const order = activeOrder();
     if (!order.length) return null;
     const off = state.offsets[roomId] || 0;
@@ -182,7 +196,11 @@
     const r = room(roomId);
     if (!r) return 1;
     const t = r.tasks.find((x) => x.id === taskId);
-    return t ? (t.p || 1) : 1;
+    return t ? clampPoints(t.p) : 1;
+  }
+  function clampPoints(p) {
+    const n = Math.round(Number(p) || 1);
+    return Math.min(4, Math.max(1, n));
   }
   function weekProgress(idx) {
     let total = 0, done = 0;
@@ -226,24 +244,37 @@
     return p;
   }
 
-  /* Verteilt die Räume so auf die Mitglieder, dass die Arbeitslast möglichst
-     gleichmäßig ist. Ergebnis wird als fester Versatz je Raum gespeichert,
-     damit der Turnus von Woche zu Woche weiterläuft. */
+  /* Verteilt die wechselnden Räume so auf die Mitglieder, dass die Arbeitslast
+     möglichst gleichmäßig ist. Ergebnis wird als fester Versatz je Raum
+     gespeichert, damit der Turnus von Woche zu Woche weiterläuft.
+     Räume mit fester Zuordnung bleiben unangetastet. */
   function computeBalanced(rooms, order, idx) {
     const n = order.length;
     const off = {};
     if (!n) return off;
     const loads = new Array(n).fill(0);
-    rooms.slice().sort((a, b) => (b.tasks || []).length - (a.tasks || []).length).forEach((r) => {
-      let bi = 0;
-      for (let i = 1; i < n; i++) if (loads[i] < loads[bi]) bi = i;
-      loads[bi] += (r.tasks || []).length;
-      off[r.id] = (((bi - idx) % n) + n) % n;
+    rooms.forEach((r) => {
+      if (r.mode === 'fixed') {
+        off[r.id] = 0;
+        const fi = order.indexOf(r.fixedMember);
+        if (fi >= 0) loads[fi] += (r.tasks || []).length;
+      }
     });
+    rooms.filter((r) => r.mode !== 'fixed')
+      .sort((a, b) => (b.tasks || []).length - (a.tasks || []).length)
+      .forEach((r) => {
+        let bi = 0;
+        for (let i = 1; i < n; i++) if (loads[i] < loads[bi]) bi = i;
+        loads[bi] += (r.tasks || []).length;
+        off[r.id] = (((bi - idx) % n) + n) % n;
+      });
     return off;
   }
   function autoBalance() {
+    const fixedOff = {};
+    state.rooms.forEach((r) => { if (r.mode === 'fixed') fixedOff[r.id] = state.offsets[r.id] || 0; });
     const off = computeBalanced(state.rooms, activeOrder(), weekIndexOf(new Date()));
+    Object.assign(off, fixedOff);
     state.offsets = off;
     save();
     render();
@@ -357,8 +388,11 @@
     let html = '<section class="card room' + (tasks.length && doneCount === tasks.length ? ' room__done' : '') + '">';
     html += '<div class="room__head">' +
       '<div class="room__icon" style="background:' + r.color + '22">' + esc(r.icon || '🧽') + '</div>' +
-      '<div class="room__meta"><h3>' + esc(r.name) + (mine ? ' <span class="pill pill--accent">Du</span>' : '') + '</h3>' +
-      '<p>' + (who ? who.emoji + ' ' + esc(who.name) : 'Niemand') + ' ist dran' + (later > 0 ? ' · ' + later + ' später' : '') + '</p></div>' +
+      '<div class="room__meta"><h3>' + esc(r.name) +
+      (mine ? ' <span class="pill pill--accent">Du</span>' : '') +
+      (r.mode === 'fixed' ? ' <span class="pill" title="Feste Zuordnung">🔒 fest</span>' : '') + '</h3>' +
+      '<p>' + (who ? who.emoji + ' ' + esc(who.name) : 'Niemand') + ' ist dran' +
+      (r.mode === 'fixed' ? ' · immer' : '') + (later > 0 ? ' · ' + later + ' später' : '') + '</p></div>' +
       '<div class="room__prog">' + doneCount + '/' + tasks.length + '</div>' +
       '</div>';
 
@@ -373,7 +407,8 @@
         '<div class="task__label">' + esc(t.title) +
         (t.freq !== 'w' ? '<div class="task__meta">' + FREQ_LABEL[t.freq] + '</div>' : '') + '</div>' +
         (e && by ? '<div class="task__by"><span class="chip-avatar chip-avatar--sm" style="background:' + by.color + '">' + by.emoji + '</span>' + esc(by.name) + '</div>' : '') +
-        '<div class="task__pts">' + (t.p || 1) + ' P</div>' +
+        '<div class="task__pts">' + clampPoints(t.p) + ' P</div>' +
+        '<button class="task__edit" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '" aria-label="Aufgabe bearbeiten">✎</button>' +
         '</div>';
     });
 
@@ -406,7 +441,8 @@
       weeks.map((w) => '<th>' + (w === base ? 'jetzt' : 'KW ' + isoWeek(weekStart(w)).week) + '</th>').join('') +
       '</tr></thead><tbody>';
     rooms.forEach((r) => {
-      html += '<tr><td>' + esc(r.icon || '') + ' ' + esc(r.name) + '</td>';
+      html += '<tr><td>' + esc(r.icon || '') + ' ' + esc(r.name) +
+        (r.mode === 'fixed' ? ' <span title="Feste Zuordnung">🔒</span>' : '') + '</td>';
       weeks.forEach((w) => {
         const a = assigneeFor(r.id, w);
         const m = member(a);
@@ -433,17 +469,34 @@
     });
     html += '</div></div>';
 
-    html += '<div class="card"><div class="card__head"><h3>Versatz je Raum</h3>' +
+    html += '<div class="card"><div class="card__head"><h3>Raumzuordnung</h3>' +
       '<button class="btn btn--sm" data-action="auto-balance">⚖️ Automatisch verteilen</button></div>' +
-      '<p class="card__sub" style="margin:-4px 0 8px">Damit nicht immer dieselbe Person zuerst drankommt</p>';
+      '<p class="card__sub" style="margin:-4px 0 10px">Je Raum entweder wechselnd im Turnus oder fest einer Person zugeteilt</p>';
     state.rooms.forEach((r) => {
       const off = state.offsets[r.id] || 0;
-      html += '<div class="row"><div class="row__main"><strong>' + esc(r.icon || '') + ' ' + esc(r.name) + '</strong>' +
-        '<span>' + (off === 0 ? 'Startet bei Position 1' : 'Startet bei Position ' + (off + 1)) + '</span></div>' +
+      const fixed = r.mode === 'fixed';
+      const fm = member(r.fixedMember);
+      html += '<div class="row roommode"><div class="row__main"><strong>' + esc(r.icon || '') + ' ' + esc(r.name) + '</strong>' +
+        '<span>' + (fixed
+          ? (fm ? 'Immer ' + esc(fm.name) : 'Keine Person gewählt')
+          : (off === 0 ? 'Startet bei Position 1' : 'Startet bei Position ' + (off + 1))) + '</span></div>' +
         '<div class="row__actions">' +
-        '<button class="btn btn--sm btn--icon" data-action="offset" data-room="' + r.id + '" data-delta="-1">−</button>' +
-        '<button class="btn btn--sm btn--icon" data-action="offset" data-room="' + r.id + '" data-delta="1">+</button>' +
+        '<div class="segmented segmented--sm">' +
+        '<button data-action="room-mode" data-room="' + r.id + '" data-mode="rotation" class="' + (!fixed ? 'is-active' : '') + '">Wechselnd</button>' +
+        '<button data-action="room-mode" data-room="' + r.id + '" data-mode="fixed" class="' + (fixed ? 'is-active' : '') + '">Fest</button>' +
+        '</div>' +
+        (fixed ? '' :
+          '<button class="btn btn--sm btn--icon" data-action="offset" data-room="' + r.id + '" data-delta="-1">−</button>' +
+          '<button class="btn btn--sm btn--icon" data-action="offset" data-room="' + r.id + '" data-delta="1">+</button>') +
         '</div></div>';
+      if (fixed) {
+        html += '<div class="fixedpick">';
+        state.members.forEach((m) => {
+          html += '<button class="chip' + (r.fixedMember === m.id ? ' chip--active' : '') + '" data-action="room-fixed" data-room="' + r.id + '" data-member="' + m.id + '">' +
+            '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>';
+        });
+        html += '</div>';
+      }
     });
     html += '</div>';
 
@@ -484,17 +537,38 @@
   }
 
   function planRooms() {
-    let html = '<div class="card"><div class="card__head"><h3>Räume & Aufgaben</h3></div>';
+    let html = '<div class="card"><div class="card__head"><h3>Räume & Aufgaben</h3>' +
+      '<button class="btn btn--sm btn--primary" data-action="task-new">+ Aufgabe</button></div>';
+    if (!state.rooms.length) {
+      html += '<p class="hint">Lege zuerst einen Raum an, dann kannst du Aufgaben dazugeben.</p>' +
+        '<button class="btn btn--block btn--primary" style="margin-top:12px" data-action="add-room">+ Raum hinzufügen</button></div>';
+      return html;
+    }
     state.rooms.forEach((r) => {
       const w = dueTasks(r, weekIndexOf(new Date())).length;
-      html += '<div class="row"><div class="room__icon" style="background:' + r.color + '22">' + esc(r.icon || '🧽') + '</div>' +
-        '<div class="row__main"><strong>' + esc(r.name) + '</strong>' +
-        '<span>' + r.tasks.length + ' Aufgaben · ' + w + ' diese Woche fällig</span></div>' +
+      const who = member(assigneeFor(r.id, weekIndexOf(new Date())));
+      html += '<div class="roomblock">' +
+        '<div class="row"><div class="room__icon" style="background:' + r.color + '22">' + esc(r.icon || '🧽') + '</div>' +
+        '<div class="row__main"><strong>' + esc(r.name) +
+        (r.mode === 'fixed' ? ' <span class="pill">🔒 fest</span>' : '') + '</strong>' +
+        '<span>' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand') +
+        ' · ' + r.tasks.length + ' Aufgaben · ' + w + ' diese Woche fällig</span></div>' +
         '<div class="row__actions"><button class="btn btn--sm" data-action="edit-room" data-room="' + r.id + '">✎</button>' +
         '<button class="btn btn--sm btn--danger" data-action="del-room" data-room="' + r.id + '">✕</button></div></div>';
+      if (!r.tasks.length) {
+        html += '<div class="taskrow taskrow--empty">Noch keine Aufgaben in diesem Raum</div>';
+      }
+      r.tasks.forEach((t) => {
+        html += '<button class="taskrow" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '">' +
+          '<span class="taskrow__title">' + esc(t.title) + '</span>' +
+          '<span class="taskrow__meta">' + FREQ_LABEL[t.freq] + '</span>' +
+          '<span class="taskrow__pts">' + clampPoints(t.p) + ' P</span>' +
+          '<span class="taskrow__pen">✎</span></button>';
+      });
+      html += '<button class="btn btn--sm btn--block taskrow__add" data-action="task-new" data-room="' + r.id + '">+ Aufgabe in ' + esc(r.name) + '</button>' +
+        '</div>';
     });
     html += '<button class="btn btn--block btn--primary" style="margin-top:12px" data-action="add-room">+ Raum hinzufügen</button></div>';
-    if (!state.rooms.length) html += '<div class="empty"><div class="empty__ico">🧽</div><h3>Keine Räume</h3><p>Lege Küche, Bad, Flur … an und packe pro Raum Aufgaben hinein.</p></div>';
     return html;
   }
 
@@ -653,21 +727,59 @@
       '<div class="field"><label>Farbe</label><div id="r-color">' +
       MEMBER_COLORS.map((c) => '<button class="chip' + (c === r.color ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (c === r.color ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Aufgaben</label><div id="r-tasks">';
-    r.tasks.forEach((t) => {
-      body += '<div class="row" style="padding:9px 0"><div class="row__main"><strong style="font-size:14px">' + esc(t.title) + '</strong>' +
-        '<span>' + FREQ_LABEL[t.freq] + ' · ' + t.p + ' Punkt' + (t.p > 1 ? 'e' : '') + '</span></div>' +
-        '<div class="row__actions"><button class="btn btn--sm btn--danger" data-action="del-task" data-room="' + r.id + '" data-task="' + t.id + '">✕</button></div></div>';
-    });
-    body += '</div></div>' +
-      '<div class="field"><label>Neue Aufgabe</label><input class="input" id="r-task-title" placeholder="z. B. Wäsche aufhängen"></div>' +
-      '<div class="row" style="border:0;gap:8px">' +
-      '<select class="input" id="r-task-freq" style="flex:1"><option value="w">wöchentlich</option><option value="2w">alle 2 Wochen</option><option value="m">monatlich</option></select>' +
-      '<select class="input" id="r-task-p" style="width:96px"><option value="1">1 P</option><option value="2">2 P</option><option value="3">3 P</option></select>' +
-      '<button class="btn btn--primary" data-action="add-task" data-room="' + r.id + '">+</button></div>';
+      '<div class="field"><label>Zuordnung</label><div class="segmented" id="r-mode">' +
+      '<button data-action="pick-mode" data-mode="rotation" class="' + (r.mode !== 'fixed' ? 'is-active' : '') + '">Wechselnd</button>' +
+      '<button data-action="pick-mode" data-mode="fixed" class="' + (r.mode === 'fixed' ? 'is-active' : '') + '">Fest</button>' +
+      '</div></div>';
+    if (r.mode === 'fixed') {
+      body += '<div class="field" id="fixedwrap"><label>Feste Person</label><div id="r-fixed">' +
+        state.members.map((m) => '<button class="chip' + (r.fixedMember === m.id ? ' chip--active' : '') + '" data-action="pick-fixed" data-member="' + m.id + '">' +
+          '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('') +
+        '</div></div>';
+    } else {
+      body += '<div class="field" id="fixedwrap" style="display:none"><label>Feste Person</label><div id="r-fixed">' +
+        state.members.map((m) => '<button class="chip" data-action="pick-fixed" data-member="' + m.id + '">' +
+          '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('') +
+        '</div></div>';
+    }
+    body += '<p class="hint">Aufgaben des Raums findest du im Tab „Räume“ – tippe dort auf eine Aufgabe, um sie zu bearbeiten.</p>';
     openSheet('Raum bearbeiten', body,
       '<button class="btn" data-action="save-room" data-room="' + r.id + '">Speichern</button>' +
       '<button class="btn btn--danger" data-action="del-room" data-room="' + r.id + '">Löschen</button>');
+  }
+
+  /* ---------- Aufgabe erstellen / bearbeiten ---------- */
+  function sheetTaskEditor(roomId, taskId) {
+    const editing = !!taskId;
+    if (!state.rooms.length) { toast('Erst einen Raum anlegen'); return; }
+    let t = null, r0 = room(roomId) || state.rooms[0];
+    if (editing) {
+      state.rooms.forEach((rr) => rr.tasks.forEach((x) => { if (x.id === taskId) { t = x; r0 = rr; } }));
+      if (!t) { toast('Aufgabe nicht gefunden'); return; }
+    }
+    const curRoom = r0;
+    const curPts = t ? clampPoints(t.p) : 1;
+
+    let body =
+      '<div class="field"><label>Raum</label><select class="input" id="t-room">' +
+      state.rooms.map((r) => '<option value="' + r.id + '"' + (r.id === curRoom.id ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
+      '</select></div>' +
+      '<div class="field"><label>Was ist zu tun?</label><input class="input" id="t-title" placeholder="z. B. Geschirr abwaschen" value="' + (t ? esc(t.title) : '') + '"></div>' +
+      '<div class="field"><label>Wie oft?</label><select class="input" id="t-freq">' +
+      ['w', '2w', 'm'].map((f) => '<option value="' + f + '"' + (t && t.freq === f ? ' selected' : '') + '>' + FREQ_LABEL[f] + '</option>').join('') +
+      '</select></div>' +
+      '<div class="field"><label>Punkte</label><div class="points" id="t-points">' +
+      [1, 2, 3, 4].map((p) => '<button class="points__btn' + (p === curPts ? ' is-active' : '') + '" data-action="pick-points" data-p="' + p + '">' +
+        '<strong>' + p + '</strong><span>P</span></button>').join('') +
+      '</div><p class="hint" style="margin-top:6px">Wie viel die Aufgabe wert ist – z. B. 1 Punkt für Geschirr, 4 Punkte für Bad putzen.</p></div>';
+    if (editing) {
+      body += '<div class="field"><label>Erledigt in der Historie</label><p class="hint">Bereits erledigte Einträge bleiben bestehen, auch wenn du die Aufgabe änderst.</p></div>';
+    }
+    openSheet(editing ? 'Aufgabe bearbeiten' : 'Aufgabe erstellen', body,
+      '<button class="btn btn--primary" data-action="save-task" data-task="' + (t ? t.id : '') + '" data-room="' + curRoom.id + '">' +
+      (editing ? 'Speichern' : 'Anlegen') + '</button>' +
+      (editing ? '<button class="btn btn--danger" data-action="del-task" data-room="' + curRoom.id + '" data-task="' + t.id + '">Löschen</button>'
+        : '<button class="btn" data-action="close-sheet">Abbrechen</button>'));
   }
 
   function sheetAddRoom() {
@@ -677,7 +789,7 @@
       '<div class="field"><label>Farbe</label><div id="r-color">' +
       MEMBER_COLORS.map((c, i) => '<button class="chip' + (i === 0 ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (i === 0 ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>';
+      '<div class="field"><label>Erste Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>';
     openSheet('Neuer Raum', body,
       '<button class="btn" data-action="save-room" data-new="1">Anlegen</button>' +
       '<button class="btn" data-action="close-sheet">Abbrechen</button>');
@@ -1003,17 +1115,26 @@
         const icon = ($('#r-icon').value || '').trim() || '🧽';
         const colorBtn = document.querySelector('#r-color .chip--active');
         const color = colorBtn ? colorBtn.dataset.color : MEMBER_COLORS[0];
+        const modeBtn = document.querySelector('#r-mode .is-active');
+        const mode = modeBtn && modeBtn.dataset.mode === 'fixed' ? 'fixed' : 'rotation';
+        const fixedBtn = document.querySelector('#r-fixed .chip--active');
+        const fixedMember = mode === 'fixed' ? (fixedBtn ? fixedBtn.dataset.member : null) : null;
         let r;
         if (el.dataset.new) {
-          r = { id: uid('r'), name, icon, color, tasks: [] };
+          r = { id: uid('r'), name, icon, color, mode, fixedMember, tasks: [] };
           state.rooms.push(r);
         } else {
           r = room(roomId);
-          if (r) { r.name = name; r.icon = icon; r.color = color; }
+          if (r) {
+            r.name = name; r.icon = icon; r.color = color;
+            r.mode = mode;
+            r.fixedMember = mode === 'fixed' ? (fixedMember || r.fixedMember || (state.members[0] ? state.members[0].id : null)) : null;
+            if (mode === 'fixed' && !r.fixedMember) r.mode = 'rotation';
+          }
         }
         const tTitle = ($('#r-task-title').value || '').trim();
         if (r && tTitle) {
-          r.tasks.push({ id: uid('t'), title: tTitle, freq: ($('#r-task-freq') || {}).value || 'w', p: Number(($('#r-task-p') || {}).value || 1) });
+          r.tasks.push({ id: uid('t'), title: tTitle, freq: 'w', p: 1 });
         }
         if (r && el.dataset.new) {
           // Neuen Raum der Person geben, die diese Woche am wenigsten zu tun hat
@@ -1035,21 +1156,106 @@
         save(); closeSheet(); render(); toast(el.dataset.new ? 'Raum angelegt' : 'Gespeichert');
         break;
       }
-      case 'add-task': {
-        const r = room(roomId);
-        const title = ($('#r-task-title').value || '').trim();
-        if (!r || !title) { toast('Bitte eine Aufgabe eingeben'); break; }
-        r.tasks.push({ id: uid('t'), title, freq: ($('#r-task-freq') || {}).value || 'w', p: Number(($('#r-task-p') || {}).value || 1) });
-        save(); render(); sheetEditRoom(roomId);
-        $('#r-task-title').value = '';
-        toast('Aufgabe hinzugefügt');
+      /* ---------- Aufgaben ---------- */
+      case 'task-new': {
+        const preselect = roomId || (state.rooms[0] ? state.rooms[0].id : null);
+        sheetTaskEditor(preselect, null);
+        break;
+      }
+      case 'task-edit': sheetTaskEditor(roomId, taskId); break;
+      case 'pick-points': {
+        const box = document.getElementById('t-points');
+        if (box) {
+          box.querySelectorAll('.points__btn').forEach((c) => c.classList.remove('is-active'));
+          el.classList.add('is-active');
+        }
+        break;
+      }
+      case 'save-task': {
+        const title = ($('#t-title').value || '').trim();
+        if (!title) { toast('Bitte eine Aufgabenbezeichnung eingeben'); break; }
+        const targetRoomId = ($('#t-room') || {}).value || roomId;
+        const freq = ($('#t-freq') || {}).value || 'w';
+        const pts = clampPoints(document.querySelector('#t-points .is-active')
+          ? document.querySelector('#t-points .is-active').dataset.p : 1);
+        const editingId = el.dataset.task;
+        const target = room(targetRoomId);
+        if (!target) break;
+        if (editingId) {
+          // Aufgabe suchen (kann in einem anderen Raum liegen) und verschieben/bearbeiten
+          let found = null, source = null;
+          state.rooms.forEach((rr) => rr.tasks.forEach((t) => { if (t.id === editingId) { found = t; source = rr; } }));
+          if (found) {
+            found.title = title; found.freq = freq; found.p = pts;
+            if (source.id !== target.id) {
+              // In einen anderen Raum verschoben
+              source.tasks = source.tasks.filter((t) => t.id !== editingId);
+              target.tasks.push(found);
+            }
+          }
+          toast('Aufgabe gespeichert');
+        } else {
+          target.tasks.push({ id: uid('t'), title, freq, p: pts });
+          toast('Aufgabe angelegt ✓');
+        }
+        save(); closeSheet(); render();
         break;
       }
       case 'del-task': {
         const r = room(roomId);
         if (!r) break;
+        if (!confirm('Aufgabe wirklich löschen?')) break;
         r.tasks = r.tasks.filter((t) => t.id !== taskId);
-        save(); render(); sheetEditRoom(roomId);
+        // Erledigungen der gelöschten Aufgabe aus der Historie entfernen
+        Object.keys(state.weeks).forEach((wk) => {
+          const done = state.weeks[wk] && state.weeks[wk].done;
+          if (done && done[r.id]) delete done[r.id][taskId];
+        });
+        save(); closeSheet(); render(); toast('Aufgabe gelöscht');
+        break;
+      }
+      /* ---------- Raumzuordnung ---------- */
+      case 'pick-mode': {
+        const box = document.getElementById('r-mode');
+        if (box) {
+          box.querySelectorAll('button').forEach((c) => c.classList.remove('is-active'));
+          el.classList.add('is-active');
+          const wrap = document.getElementById('fixedwrap');
+          if (wrap) wrap.style.display = el.dataset.mode === 'fixed' ? '' : 'none';
+        }
+        break;
+      }
+      case 'pick-fixed': {
+        const box = document.getElementById('r-fixed');
+        if (box) {
+          box.querySelectorAll('.chip').forEach((c) => c.classList.remove('chip--active'));
+          el.classList.add('is-active');
+        }
+        break;
+      }
+      case 'room-mode': {
+        const r = room(roomId);
+        if (!r) break;
+        r.mode = el.dataset.mode === 'fixed' ? 'fixed' : 'rotation';
+        if (r.mode === 'fixed') {
+          if (!r.fixedMember || !member(r.fixedMember)) {
+            const idx = weekIndexOf(new Date());
+            r.fixedMember = assigneeFor(r.id, idx) || (state.members[0] ? state.members[0].id : null);
+          }
+        } else {
+          r.fixedMember = null;
+        }
+        save(); render();
+        toast(r.mode === 'fixed' ? 'Feste Zuordnung aktiv' : 'Wechselnder Turnus');
+        break;
+      }
+      case 'room-fixed': {
+        const r = room(roomId);
+        if (!r) break;
+        r.mode = 'fixed';
+        r.fixedMember = id;
+        save(); render();
+        toast('Immer ' + member(id).name);
         break;
       }
       case 'del-room': {
@@ -1286,6 +1492,7 @@
   window.__app = {
     get state() { return state; },
     set state(v) { state = v; },
-    weekIndexOf, isoWeek, taskDue, encodeState, decodeState, mergeState, save, render, pointsOf
+    weekIndexOf, isoWeek, taskDue, encodeState, decodeState, mergeState, save, render, pointsOf,
+    assigneeFor, dueTasks, clampPoints
   };
 })();
