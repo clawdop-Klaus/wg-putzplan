@@ -499,6 +499,11 @@
       el.className = 'syncstatus syncstatus--' + status;
       el.textContent = text || status;
     }
+    const badge = document.getElementById('syncbadge');
+    if (badge) {
+      badge.textContent = status === 'ok' ? 'verbunden' : (status === 'fehler' ? 'Fehler' : (status === 'arbeitet' ? 'verbinde …' : 'aus'));
+      badge.className = 'pill ' + (status === 'ok' ? 'pill--ok' : (status === 'fehler' ? 'pill--danger' : ''));
+    }
   }
   function schedulePush() {
     if (!syncReady()) return;
