@@ -13,7 +13,7 @@
 
   /* ---------- State ---------- */
   let state = load();
-  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null };
+  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null };
   let installPrompt = null;
   let toastTimer = null;
 
@@ -295,12 +295,21 @@
     av.style.background = cur ? cur.color : 'var(--accent)';
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.view === ui.view));
     const main = $('#main');
+    const keepScroll = (ui.view === ui.lastView) ? window.scrollY : 0;
     if (ui.view === 'week') main.innerHTML = viewWeek();
     else if (ui.view === 'plan') main.innerHTML = viewPlan();
     else if (ui.view === 'stats') main.innerHTML = viewStats();
     else main.innerHTML = viewMore();
     updateHeader();
-    window.scrollTo(0, ui.view === 'week' ? 0 : window.scrollY);
+    // Scroll nur zurücksetzen, wenn die Ansicht wirklich wechselt – sonst springt
+    // die Seite beim Abhaken einer Aufgabe nach oben. Die Position wird danach
+    // wiederhergestellt, weil Chromium beim Neusatz sonst selbst nachregelt.
+    if (ui.view !== ui.lastView) {
+      window.scrollTo(0, 0);
+      ui.lastView = ui.view;
+    } else if (keepScroll) {
+      window.scrollTo(0, keepScroll);
+    }
   }
 
   function updateHeader() {
@@ -391,8 +400,10 @@
       '<div class="room__meta"><h3>' + esc(r.name) +
       (mine ? ' <span class="pill pill--accent">Du</span>' : '') +
       (r.mode === 'fixed' ? ' <span class="pill" title="Feste Zuordnung">🔒 fest</span>' : '') + '</h3>' +
-      '<p>' + (who ? who.emoji + ' ' + esc(who.name) : 'Niemand') + ' ist dran' +
-      (r.mode === 'fixed' ? ' · immer' : '') + (later > 0 ? ' · ' + later + ' später' : '') + '</p></div>' +
+      '<p>' + (r.mode === 'fixed'
+        ? (who ? '🔒 Immer ' + who.emoji + ' ' + esc(who.name) : '🔒 Keine Person fest zugeordnet')
+        : (who ? who.emoji + ' ' + esc(who.name) + ' ist dran' : 'Niemand ist dran')) +
+      (later > 0 ? ' · ' + later + ' später' : '') + '</p></div>' +
       '<div class="room__prog">' + doneCount + '/' + tasks.length + '</div>' +
       '</div>';
 
@@ -414,7 +425,10 @@
 
     html += '<div class="room__foot">' +
       '<button class="btn btn--sm" data-action="room-note" data-room="' + r.id + '">📝 ' + (note ? 'Notiz ansehen' : 'Notiz') + '</button>' +
-      (doneCount < tasks.length ? '<button class="btn btn--sm btn--primary" data-action="room-all" data-room="' + r.id + '">Alles erledigt</button>' : '<span class="pill pill--ok" style="align-self:center">✓ fertig</span>') +
+      (doneCount < tasks.length
+        ? '<button class="btn btn--sm btn--primary" data-action="room-all" data-room="' + r.id + '">' +
+          (mine ? 'Alles erledigt' : 'Alles für mich erledigt') + '</button>'
+        : '<span class="pill pill--ok" style="align-self:center">✓ fertig</span>') +
       '</div>';
     if (note) html += '<div style="padding:0 14px 12px"><div class="notice">📝 ' + esc(note) + '</div></div>';
     html += '</section>';
@@ -551,8 +565,10 @@
         '<div class="row"><div class="room__icon" style="background:' + r.color + '22">' + esc(r.icon || '🧽') + '</div>' +
         '<div class="row__main"><strong>' + esc(r.name) +
         (r.mode === 'fixed' ? ' <span class="pill">🔒 fest</span>' : '') + '</strong>' +
-        '<span>' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand') +
-        ' · ' + r.tasks.length + ' Aufgaben · ' + w + ' diese Woche fällig</span></div>' +
+        '<span>' + (r.mode === 'fixed'
+          ? '🔒 immer ' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand')
+          : 'diese Woche ' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand')) +
+        ' · ' + r.tasks.length + ' Aufgaben · ' + w + ' fällig</span></div>' +
         '<div class="row__actions"><button class="btn btn--sm" data-action="edit-room" data-room="' + r.id + '">✎</button>' +
         '<button class="btn btn--sm btn--danger" data-action="del-room" data-room="' + r.id + '">✕</button></div></div>';
       if (!r.tasks.length) {
@@ -773,7 +789,7 @@
         '<strong>' + p + '</strong><span>P</span></button>').join('') +
       '</div><p class="hint" style="margin-top:6px">Wie viel die Aufgabe wert ist – z. B. 1 Punkt für Geschirr, 4 Punkte für Bad putzen.</p></div>';
     if (editing) {
-      body += '<div class="field"><label>Erledigt in der Historie</label><p class="hint">Bereits erledigte Einträge bleiben bestehen, auch wenn du die Aufgabe änderst.</p></div>';
+      body += '<div class="field"><label>Erledigt in der Historie</label><p class="hint">Bereits erledigte Einträge bleiben bestehen – auch wenn du die Aufgabe änderst oder in einen anderen Raum verschiebst.</p></div>';
     }
     openSheet(editing ? 'Aufgabe bearbeiten' : 'Aufgabe erstellen', body,
       '<button class="btn btn--primary" data-action="save-task" data-task="' + (t ? t.id : '') + '" data-room="' + curRoom.id + '">' +
@@ -904,6 +920,8 @@
 
   function mergeState(local, incoming) {
     const out = JSON.parse(JSON.stringify(local));
+    // Ist der geteilte Stand neuer, übernimmt er Einstellungen (Zuordnung, Punkte).
+    const incomingNewer = (incoming.updatedAt || 0) > (local.updatedAt || 0);
     // Mitglieder
     incoming.members.forEach((m) => {
       if (!out.members.find((x) => x.id === m.id)) {
@@ -915,7 +933,22 @@
     incoming.rooms.forEach((r) => {
       const ex = out.rooms.find((x) => x.id === r.id);
       if (!ex) { out.rooms.push(r); return; }
-      r.tasks.forEach((t) => { if (!ex.tasks.find((x) => x.id === t.id)) ex.tasks.push(t); });
+      if (incomingNewer) {
+        // Feste oder wechselnde Zuordnung mit übernehmen
+        ex.mode = r.mode === 'fixed' ? 'fixed' : 'rotation';
+        ex.fixedMember = r.mode === 'fixed' ? (r.fixedMember || null) : null;
+        if (ex.mode === 'fixed' && !member(ex.fixedMember)) ex.mode = 'rotation';
+        if (ex.mode === 'rotation') ex.fixedMember = null;
+      }
+      r.tasks.forEach((t) => {
+        const et = ex.tasks.find((x) => x.id === t.id);
+        if (!et) { ex.tasks.push(t); return; }
+        if (incomingNewer) {
+          et.title = t.title;
+          et.freq = t.freq || 'w';
+          et.p = clampPoints(t.p);
+        }
+      });
     });
     // Erledigtes vereinen (neuere gewinnt)
     Object.keys(incoming.weeks || {}).forEach(wk => {
@@ -1081,11 +1114,19 @@
       case 'del-member': {
         const m = member(id);
         if (!m) break;
-        if (!confirm('„' + m.name + '“ wirklich entfernen? Die Aufgaben bleiben im Plan, nur die Person nicht mehr.')) break;
+        const festRaeume = state.rooms.filter((r) => r.fixedMember === id).length;
+        if (!confirm('„' + m.name + '“ wirklich entfernen? Die Aufgaben bleiben im Plan, nur die Person nicht mehr.' +
+          (festRaeume ? '\n\n' + festRaeume + ' Raum/Räume waren dieser Person fest zugeordnet und wechseln zurück in den Turnus.' : ''))) break;
         state.members = state.members.filter((x) => x.id !== id);
         state.order = state.order.filter((x) => x !== id);
         if (state.currentUser === id) state.currentUser = state.members[0] ? state.members[0].id : null;
-        save(); closeSheet(); render(); toast('Person entfernt');
+        // Räume, die nur dieser Person fest zugeordnet waren, wechseln zurück in den Turnus
+        let reverted = 0;
+        state.rooms.forEach((r) => {
+          if (r.fixedMember === id) { r.fixedMember = null; r.mode = 'rotation'; reverted++; }
+        });
+        save(); closeSheet(); render();
+        toast(reverted ? 'Person entfernt – ' + reverted + ' Raum/Räume wieder im Turnus' : 'Person entfernt');
         break;
       }
       case 'move-up': case 'move-down': {
@@ -1188,9 +1229,17 @@
           if (found) {
             found.title = title; found.freq = freq; found.p = pts;
             if (source.id !== target.id) {
-              // In einen anderen Raum verschoben
+              // In einen anderen Raum verschoben – Erledigungen wandern mit,
+              // sonst gingen die Punkte der Aufgabe verloren.
               source.tasks = source.tasks.filter((t) => t.id !== editingId);
               target.tasks.push(found);
+              Object.keys(state.weeks).forEach((wk) => {
+                const done = state.weeks[wk] && state.weeks[wk].done;
+                if (!done || !done[source.id] || !done[source.id][editingId]) return;
+                if (!done[target.id]) done[target.id] = {};
+                done[target.id][editingId] = done[source.id][editingId];
+                delete done[source.id][editingId];
+              });
             }
           }
           toast('Aufgabe gespeichert');

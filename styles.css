@@ -446,3 +446,7 @@ html[data-theme="dark"] html[data-theme="auto"][data-os="dark"] .pill--warn{back
   font-size:12px;line-height:1;cursor:pointer;display:grid;place-items:center;
 }
 .task__edit:active{transform:scale(.92)}
+
+/* Chromium würde beim Neusatz des Inhalts die Scrollposition von selbst
+   nachregeln – die App hält sie stattdessen selbst fest. */
+html,body,.main{overflow-anchor:none}
