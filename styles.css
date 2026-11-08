@@ -450,3 +450,13 @@ html[data-theme="dark"] html[data-theme="auto"][data-os="dark"] .pill--warn{back
 /* Chromium würde beim Neusatz des Inhalts die Scrollposition von selbst
    nachregeln – die App hält sie stattdessen selbst fest. */
 html,body,.main{overflow-anchor:none}
+
+/* =========================================================
+   Paket A: Schnellerfassung, Fairness, Kalender
+   ========================================================= */
+.quickadd{display:flex;gap:8px;align-items:stretch}
+.quickadd .input{flex:1;min-width:0}
+.quickadd select.input{flex:0 0 40%;max-width:160px}
+.quickadd .btn{flex:0 0 auto;padding:0 16px;font-size:18px;line-height:1}
+
+.weeknav .iconbtn{font-size:16px}

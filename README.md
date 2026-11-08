@@ -7,10 +7,23 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 
 | Bereich | Funktion |
 |---|---|
-| **Woche** | Alle Räume mit Aufgabenliste, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Notizen pro Raum, „Alles erledigt“ |
+| **Woche** | Alle Räume mit Aufgabenliste, Filter „Meine Aufgaben“, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Schnellerfassung, Kalender-Export, Notizen pro Raum, „Alles erledigt“ |
 | **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, feste oder wechselnde Raumzuordnung, automatische Verteilung, Aufgaben & Räume verwalten |
-| **Statistik** | Punkte pro Person, erledigte Aufgaben, Aktivität der letzten 8 Wochen, Zustand je Raum |
+| **Statistik** | Punkte pro Person, Fairness-Kennzahl, Auslastung der nächsten 4 Wochen, Aktivität der letzten 8 Wochen, Zustand je Raum |
 | **Mehr** | WG-Name, Hell/Dunkel, Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
+
+### Die wichtigsten Bedienknöpfe
+
+* **„Meine Aufgaben“** – oben in der Wochenansicht umschalten: zeigt nur die Räume, die an dir
+  hängen. Das App-Icon zählt zusätzlich deine offenen Aufgaben (Badge, wenn das Gerät es unterstützt).
+* **📅 in der Wochenleiste** – exportiert die Woche als Kalenderdatei (`.ics`). Jeder Raum wird zu
+  einem Termin mit Aufgabenliste, Punkten und Zuständigkeit – das Handy erinnert dann von selbst.
+* **Schnellerfassung** – unten in der Wochenansicht: Raum wählen, Aufgabe eintippen, fertig.
+  Frequenz und Punkte werden von der zuletzt angelegten Aufgabe übernommen.
+* **Rückgängig** – nach dem Löschen einer Aufgabe oder eines Raums erscheint im Toast ein
+  „Rückgängig“-Knopf; es wird exakt an der alten Stelle wiederhergestellt.
+* **Fairness** (Statistik) – zeigt, ob die Punkte gleichmäßig verteilt sind, und wie oft jede
+  Person in den nächsten 4 Wochen dran ist.
 
 ### Aufgaben und Turnus
 
@@ -104,6 +117,14 @@ wg-putzplan/
 ├── sw.js                 Service Worker (Offline)
 └── icons/                Icons 192/512, Maskable, Apple-Touch, Favicon
 ```
+
+## Updates & Zwischenspeicher
+
+Die App ist eine PWA: Beim ersten Öffnen werden alle Dateien in den Browser-Cache gelegt,
+sodass sie offline läuft. Beim nächsten Start holt sich die App im Hintergrund eine frische
+Version vom Server (stale-while-revalidate) – wer die App bereits installiert hat, bekommt
+Updates also automatisch, ohne sie neu zu installieren. Erscheint oben ein Balken
+„Neue Version verfügbar", genügt ein Klick.
 
 ## Datenschutz
 

@@ -1,5 +1,5 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v3';
+const CACHE = 'wg-putzplan-v4';
 const ASSETS = [
   './',
   './index.html',

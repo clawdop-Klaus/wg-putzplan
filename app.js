@@ -13,7 +13,7 @@
 
   /* ---------- State ---------- */
   let state = load();
-  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null };
+  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null, weekFilter: 'all' };
   let installPrompt = null;
   let toastTimer = null;
 
@@ -198,6 +198,7 @@
     const t = r.tasks.find((x) => x.id === taskId);
     return t ? clampPoints(t.p) : 1;
   }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function clampPoints(p) {
     const n = Math.round(Number(p) || 1);
     return Math.min(4, Math.max(1, n));
@@ -301,6 +302,7 @@
     else if (ui.view === 'stats') main.innerHTML = viewStats();
     else main.innerHTML = viewMore();
     updateHeader();
+    updateBadge();
     // Scroll nur zurücksetzen, wenn die Ansicht wirklich wechselt – sonst springt
     // die Seite beim Abhaken einer Aufgabe nach oben. Die Position wird danach
     // wiederhergestellt, weil Chromium beim Neusatz sonst selbst nachregelt.
@@ -327,6 +329,100 @@
 
   const currentIndex = () => weekIndexOf(new Date()) + ui.weekOffset;
 
+
+  /* ---------- Datei-Download ---------- */
+  function downloadFile(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  /* ---------- Kalender-Export (ICS) ---------- */
+  function icsEscape(s) {
+    return String(s == null ? '' : s)
+      .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')
+      .replace(/\r?\n/g, '\\n');
+  }
+  function icsStamp(d) {
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + 'T' +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+  function buildIcs(idx) {
+    const monday = weekStart(idx);
+    const lines = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//WG-Putzplan//DE',
+      'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+      'X-WR-CALNAME:' + icsEscape((state.wgName || 'WG') + ' – Putzplan ' + weekLabel(idx))
+    ];
+    state.rooms.forEach((r, ri) => {
+      const tasks = dueTasks(r, idx);
+      if (!tasks.length) return;
+      const who = member(assigneeFor(r.id, idx));
+      const day = ri % 7;
+      const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 17, 0, 0);
+      const end = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 18, 0, 0);
+      const punkte = tasks.reduce((a, t) => a + clampPoints(t.p), 0);
+      const offen = tasks.filter((t) => !doneEntry(r.id, t.id, idx)).length;
+      const detail = tasks.map((t) => '• ' + t.title + ' (' + clampPoints(t.p) + ' P' +
+        (doneEntry(r.id, t.id, idx) ? ', erledigt' : '') + ')').join('\n');
+      lines.push('BEGIN:VEVENT');
+      lines.push('UID:' + r.id + '-' + weekKey(idx) + '@wg-putzplan');
+      lines.push('DTSTAMP:' + icsStamp(new Date()));
+      lines.push('DTSTART:' + icsStamp(start));
+      lines.push('DTEND:' + icsStamp(end));
+      lines.push('SUMMARY:' + icsEscape(r.name + ' putzen' + (offen ? ' (' + offen + ' offen)' : '')));
+      lines.push('DESCRIPTION:' + icsEscape(
+        'Zuständig: ' + (who ? who.name : '–') + '\n' + punkte + ' Punkte gesamt\n' + detail));
+      lines.push('CATEGORIES:WG-Putzplan,' + icsEscape(r.name));
+      lines.push('END:VEVENT');
+    });
+    lines.push('END:VCALENDAR');
+    // Zeilenfaltung nach RFC 5545 (max. 75 Oktett je Zeile)
+    return lines.map(foldIcsLine).join('\r\n');
+  }
+  function foldIcsLine(line) {
+    if (line.length <= 73) return line;
+    const out = [];
+    let rest = line;
+    out.push(rest.slice(0, 73));
+    rest = rest.slice(73);
+    while (rest.length) {
+      out.push(' ' + rest.slice(0, 72));
+      rest = rest.slice(72);
+    }
+    return out.join('\r\n');
+  }
+  function exportIcs(idx) {
+    const name = (state.wgName || 'wg-putzplan').replace(/[^\w\-äöüÄÖÜß ]/g, '').replace(/\s+/g, '-');
+    downloadFile(name + '-' + weekKey(idx) + '.ics', buildIcs(idx), 'text/calendar;charset=utf-8');
+    toast('Kalenderdatei erzeugt 📅');
+  }
+
+  /* ---------- App-Badge: offene eigene Aufgaben ---------- */
+  function openTasksOfUser(idx) {
+    let n = 0;
+    state.rooms.forEach((r) => {
+      if (assigneeFor(r.id, idx) !== state.currentUser) return;
+      dueTasks(r, idx).forEach((t) => { if (!doneEntry(r.id, t.id, idx)) n++; });
+    });
+    return n;
+  }
+  function updateBadge() {
+    try {
+      if (!navigator.setAppBadge) return;
+      const n = openTasksOfUser(currentIndex());
+      if (n > 0) navigator.setAppBadge(n);
+      else if (navigator.clearAppBadge) navigator.clearAppBadge();
+    } catch (e) { /* Badge-API nicht verfügbar (z. B. iOS ohne Installation) */ }
+  }
+
   /* ---------- Woche ---------- */
   function viewWeek() {
     const idx = currentIndex();
@@ -349,6 +445,13 @@
       '<p>' + heroSub(idx, p) + '</p></div>' +
       '</section>';
 
+    // Filter: alle Räume oder nur die, die an mir hängen
+    const onlyMine = ui.weekFilter === 'mine';
+    html += '<div class="segmented" style="margin-bottom:12px">' +
+      '<button data-action="week-filter" data-filter="all" class="' + (!onlyMine ? 'is-active' : '') + '">Alle Räume</button>' +
+      '<button data-action="week-filter" data-filter="mine" class="' + (onlyMine ? 'is-active' : '') + '">Meine Aufgaben</button>' +
+      '</div>';
+
     if (state.rooms.length === 0) {
       html += '<div class="empty"><div class="empty__ico">🧽</div><h3>Noch keine Räume</h3>' +
         '<p>Lege im Tab <strong>Turnus → Räume</strong> die Bereiche fest, die geputzt werden.</p>' +
@@ -356,8 +459,33 @@
       return html;
     }
 
-    sorted.forEach((r) => { html += roomCard(r, idx, done); });
+    const shown = onlyMine ? sorted.filter((r) => assigneeFor(r.id, idx) === state.currentUser) : sorted;
+    if (onlyMine && !shown.length) {
+      html += '<div class="empty"><div class="empty__ico">🎉</div><h3>Heute nichts für dich</h3>' +
+        '<p>In dieser Woche ist dir kein Raum zugeteilt. Schau in den <strong>Turnus</strong>, wer als Nächstes dran ist.</p>' +
+        '<p style="margin-top:14px"><button class="btn" data-action="week-filter" data-filter="all">Alle Räume zeigen</button></p></div>';
+      return html;
+    }
+    shown.forEach((r) => { html += roomCard(r, idx, done); });
+    html += quickAddCard(idx);
     return html;
+  }
+
+  /* ---------- Schnellerfassung (Schritt 3) ---------- */
+  function quickAddCard(idx) {
+    if (!state.rooms.length) return '';
+    const def = state.quickDefaults || { freq: 'w', p: 1 };
+    return '<div class="card"><div class="card__head"><h3>Schnell Aufgabe anlegen</h3>' +
+      '<span class="card__sub">' + FREQ_LABEL[def.freq] + ' · ' + clampPoints(def.p) + ' P</span></div>' +
+      '<div class="quickadd">' +
+      '<select class="input" id="qa-room">' +
+      state.rooms.map((r) => '<option value="' + r.id + '">' + esc(r.icon || '') + ' ' + esc(r.name) + '</option>').join('') +
+      '</select>' +
+      '<input class="input" id="qa-title" placeholder="Aufgabe eintippen …">' +
+      '<button class="btn btn--primary" data-action="quick-add">＋</button>' +
+      '</div>' +
+      '<p class="hint" style="margin-top:8px">Frequenz und Punkte werden von der zuletzt angelegten Aufgabe übernommen – änderbar im Aufgaben-Dialog.</p>' +
+      '</div>';
   }
 
   function heroSub(idx, p) {
@@ -528,7 +656,7 @@
       const p = pointsOf(m.id);
       html += '<div class="row"><span class="chip-avatar" style="background:' + m.color + '">' + m.emoji + '</span>' +
         '<div class="row__main"><strong>' + esc(m.name) + (m.id === state.currentUser ? ' <span class="pill pill--accent">Du</span>' : '') + '</strong>' +
-        '<span>' + p + ' Punkte · ' + tasksDoneBy(m.id) + ' Aufgaben</span></div>' +
+        '<span>' + plural(p, 'Punkt', 'Punkte') + ' · ' + plural(tasksDoneBy(m.id), 'Aufgabe', 'Aufgaben') + '</span></div>' +
         '<div class="row__actions">' +
         '<button class="btn btn--sm" data-action="set-user" data-member="' + m.id + '">Ich</button>' +
         '<button class="btn btn--sm" data-action="edit-member" data-member="' + m.id + '">✎</button>' +
@@ -568,7 +696,7 @@
         '<span>' + (r.mode === 'fixed'
           ? '🔒 immer ' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand')
           : 'diese Woche ' + (who ? who.emoji + ' ' + esc(who.name) : 'niemand')) +
-        ' · ' + r.tasks.length + ' Aufgaben · ' + w + ' fällig</span></div>' +
+        ' · ' + plural(r.tasks.length, 'Aufgabe', 'Aufgaben') + ' · ' + w + ' fällig</span></div>' +
         '<div class="row__actions"><button class="btn btn--sm" data-action="edit-room" data-room="' + r.id + '">✎</button>' +
         '<button class="btn btn--sm btn--danger" data-action="del-room" data-room="' + r.id + '">✕</button></div></div>';
       if (!r.tasks.length) {
@@ -589,6 +717,27 @@
   }
 
   /* ---------- Statistik ---------- */
+  function fairnessOf(list) {
+    const vals = list.map((m) => pointsOf(m.id));
+    const sum = vals.reduce((a, b) => a + b, 0);
+    const max = Math.max(...vals, 1);
+    const min = Math.min(...vals);
+    const spread = max - min;
+    const rel = sum ? spread / sum : 0;
+    let label, text, ok;
+    if (rel <= 0.15) {
+      label = 'gut verteilt'; ok = true;
+      text = 'Die Punkte liegen nah beieinander – die Arbeit ist gerecht verteilt.';
+    } else if (rel <= 0.4) {
+      label = 'leichte Unterschiede'; ok = false;
+      text = 'Die Arbeit ist überwiegend verteilt, einzelne haben etwas mehr übernommen (Spanne: ' + spread + ' Punkte).';
+    } else {
+      label = 'deutliche Unterschiede'; ok = false;
+      text = 'Die Last ist ungleich verteilt (Spanne: ' + spread + ' Punkte). Mit „Automatisch verteilen“ oder festen Räumen lässt sich das ausgleichen.';
+    }
+    return { label, text, ok, sum, max, min, spread };
+  }
+
   function viewStats() {
     const idx = currentIndex();
     const p = weekProgress(idx);
@@ -596,7 +745,7 @@
     const max = Math.max(1, ...pts.map((x) => x.p));
     const sum = pts.reduce((a, b) => a + b.p, 0);
 
-    let html = '<div class="card"><div class="card__head"><h3>Punkte</h3><span class="card__sub">gesamt ' + sum + ' Punkte</span></div>';
+    let html = '<div class="card"><div class="card__head"><h3>Punkte</h3><span class="card__sub">gesamt ' + plural(sum, 'Punkt', 'Punkte') + '</span></div>';
     if (!pts.length) html += '<p class="hint">Noch keine Punkte vergeben.</p>';
     pts.sort((a, b) => b.p - a.p).forEach((x) => {
       html += '<div style="margin-bottom:14px">' +
@@ -605,7 +754,7 @@
         '<strong style="flex:1;font-size:14.5px">' + esc(x.m.name) + '</strong>' +
         '<span style="font-weight:750;font-size:14px">' + x.p + ' P</span></div>' +
         '<div class="bar"><div class="bar__fill" style="width:' + Math.round((x.p / max) * 100) + '%;background:' + x.m.color + '"></div></div>' +
-        '<div class="hint" style="margin-top:4px">' + x.n + ' Aufgaben erledigt' + (x.m.id === state.currentUser ? ' · das bist du' : '') + '</div>' +
+        '<div class="hint" style="margin-top:4px">' + plural(x.n, 'Aufgabe', 'Aufgaben') + ' erledigt' + (x.m.id === state.currentUser ? ' · das bist du' : '') + '</div>' +
         '</div>';
     });
     html += '</div>';
@@ -623,6 +772,56 @@
     html += '</div><div class="spark__labels">';
     weeks.forEach((w) => { html += '<span>KW ' + isoWeek(weekStart(w)).week + '</span>'; });
     html += '</div></div>';
+
+    // ---- Fairness: wie gleichmäßig sind die Punkte verteilt? ----
+    const active = state.members.filter((m) => pointsOf(m.id) > 0);
+    html += '<div class="card"><div class="card__head"><h3>Fairness</h3>' +
+      (active.length > 1 ? '<span class="pill ' + (fairnessOf(active).ok ? 'pill--ok' : 'pill--warn') + '">' + fairnessOf(active).label + '</span>' : '') +
+      '</div>';
+    if (active.length < 2) {
+      html += '<p class="hint">Sobald mindestens zwei Personen Punkte haben, sieht man hier, wie gleichmäßig die Arbeit verteilt ist.</p>';
+    } else {
+      const f = fairnessOf(active);
+      html += '<p class="hint">' + esc(f.text) + '</p>';
+      html += '<div style="margin-top:12px">';
+      active.slice().sort((a, b) => pointsOf(b.id) - pointsOf(a.id)).forEach((m) => {
+        const pv = pointsOf(m.id);
+        const share = f.sum ? Math.round((pv / f.sum) * 100) : 0;
+        html += '<div style="margin-bottom:10px"><div style="display:flex;gap:9px;align-items:center">' +
+          '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' +
+          '<strong style="flex:1;font-size:14px">' + esc(m.name) + '</strong>' +
+          '<span style="font-size:13px;color:var(--muted)">' + pv + ' P · ' + share + ' %</span></div>' +
+          '<div class="bar"><div class="bar__fill" style="width:' + Math.min(100, Math.round((pv / f.max) * 100)) + '%;background:' + m.color + '"></div></div>' +
+          '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // ---- Auslastung der nächsten Wochen ----
+    const baseAhead = weekIndexOf(new Date());
+    const weeksAhead = [0, 1, 2, 3];
+    const load = {};
+    state.members.forEach((m) => { load[m.id] = { rooms: 0, tasks: 0 }; });
+    weeksAhead.forEach((w) => {
+      state.rooms.forEach((r) => {
+        const a = assigneeFor(r.id, baseAhead + w);
+        if (!a || !load[a]) return;
+        load[a].rooms++;
+        load[a].tasks += dueTasks(r, baseAhead + w).length;
+      });
+    });
+    const maxLoad = Math.max(1, ...state.members.map((m) => load[m.id].tasks));
+    html += '<div class="card"><div class="card__head"><h3>Auslastung</h3><span class="card__sub">nächste 4 Wochen</span></div>';
+    state.members.slice().sort((a, b) => load[b.id].tasks - load[a.id].tasks).forEach((m) => {
+      html += '<div style="margin-bottom:10px"><div style="display:flex;gap:9px;align-items:center">' +
+        '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' +
+        '<strong style="flex:1;font-size:14px">' + esc(m.name) + '</strong>' +
+        '<span style="font-size:13px;color:var(--muted)">' + load[m.id].rooms + '× dran · ' + plural(load[m.id].tasks, 'Aufgabe', 'Aufgaben') + '</span></div>' +
+        '<div class="bar"><div class="bar__fill" style="width:' + Math.round((load[m.id].tasks / maxLoad) * 100) + '%;background:' + m.color + '"></div></div>' +
+        '</div>';
+    });
+    html += '<p class="hint">Feste Räume zählen in jeder Woche – das ist gewollt, sie sind ja dauerhaft zugeteilt.</p></div>';
 
     html += '<div class="card"><div class="card__head"><h3>Diese Woche</h3><span class="card__sub">' + p.done + '/' + p.total + ' erledigt</span></div>';
     state.rooms.forEach((r) => {
@@ -695,7 +894,7 @@
     state.members.forEach((m) => {
       body += '<button class="opt" data-action="set-user" data-member="' + m.id + '">' +
         '<span class="chip-avatar" style="background:' + m.color + '">' + m.emoji + '</span>' +
-        '<span class="opt__main"><strong>' + esc(m.name) + '</strong><span>' + pointsOf(m.id) + ' Punkte · ' + tasksDoneBy(m.id) + ' Aufgaben</span></span>' +
+        '<span class="opt__main"><strong>' + esc(m.name) + '</strong><span>' + plural(pointsOf(m.id), 'Punkt', 'Punkte') + ' · ' + plural(tasksDoneBy(m.id), 'Aufgabe', 'Aufgaben') + '</span></span>' +
         (m.id === state.currentUser ? '<span class="pill pill--accent">Du</span>' : '') + '</button>';
     });
     body += '<button class="opt" data-action="add-member"><span class="opt__ico">➕</span><span class="opt__main"><strong>Person hinzufügen</strong></span></button>';
@@ -974,6 +1173,14 @@
   /* =========================================================
      Toast & Aktionen
      ========================================================= */
+  /* Undo: merkt sich eine Rücknahme-Aktion, die der Toast anbietet */
+  let undoFn = null;
+  function setUndo(fn) { undoFn = fn; }
+  function runUndo() {
+    if (typeof undoFn === 'function') { const f = undoFn; undoFn = null; f(); }
+    else toast('Nichts rückgängig zu machen');
+  }
+
   function toast(msg, actionLabel, action) {
     const el = $('#toast');
     clearTimeout(toastTimer);
@@ -1044,6 +1251,7 @@
         save(); render(); toast('Alles erledigt ✓');
         break;
       }
+      case 'undo-last': runUndo(); break;
       case 'undo-task': {
         const p = (el.dataset.arg || '').split('|');
         if (p.length === 2) { setDone(p[0], p[1], null); toast('Rückgängig gemacht'); }
@@ -1247,20 +1455,41 @@
           target.tasks.push({ id: uid('t'), title, freq, p: pts });
           toast('Aufgabe angelegt ✓');
         }
+        // Standardwerte für die Schnellerfassung merken
+        state.quickDefaults = { freq, p: pts };
         save(); closeSheet(); render();
         break;
       }
       case 'del-task': {
         const r = room(roomId);
         if (!r) break;
-        if (!confirm('Aufgabe wirklich löschen?')) break;
-        r.tasks = r.tasks.filter((t) => t.id !== taskId);
-        // Erledigungen der gelöschten Aufgabe aus der Historie entfernen
+        const pos = r.tasks.findIndex((t) => t.id === taskId);
+        if (pos < 0) break;
+        const removed = r.tasks[pos];
+        // Historie der Aufgabe sichern (für das Rückgängig-Machen)
+        const hist = {};
         Object.keys(state.weeks).forEach((wk) => {
           const done = state.weeks[wk] && state.weeks[wk].done;
-          if (done && done[r.id]) delete done[r.id][taskId];
+          if (done && done[r.id] && done[r.id][taskId]) {
+            hist[wk] = { entry: done[r.id][taskId], note: (state.weeks[wk].notes || {})[r.id] || null };
+            delete done[r.id][taskId];
+          }
         });
-        save(); closeSheet(); render(); toast('Aufgabe gelöscht');
+        r.tasks.splice(pos, 1);
+        setUndo(() => {
+          const rr = room(r.id);
+          if (!rr) return;
+          rr.tasks.splice(Math.min(pos, rr.tasks.length), 0, removed);
+          Object.keys(hist).forEach((wk) => {
+            if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
+            if (!state.weeks[wk].done) state.weeks[wk].done = {};
+            if (!state.weeks[wk].done[r.id]) state.weeks[wk].done[r.id] = {};
+            state.weeks[wk].done[r.id][taskId] = hist[wk].entry;
+          });
+          save(); render(); toast('Aufgabe wiederhergestellt');
+        });
+        save(); closeSheet(); render();
+        toast('Aufgabe gelöscht', 'Rückgängig', { name: 'undo-last' });
         break;
       }
       /* ---------- Raumzuordnung ---------- */
@@ -1310,12 +1539,41 @@
       case 'del-room': {
         const r = room(roomId);
         if (!r) break;
-        if (!confirm('Raum „' + r.name + '“ löschen?')) break;
-        state.rooms = state.rooms.filter((x) => x.id !== roomId);
+        const pos = state.rooms.findIndex((x) => x.id === roomId);
+        const offset = state.offsets[roomId];
+        const weeks = JSON.parse(JSON.stringify(state.weeks));
+        state.rooms.splice(pos, 1);
         delete state.offsets[roomId];
-        save(); closeSheet(); render(); toast('Raum gelöscht');
+        setUndo(() => {
+          state.rooms.splice(Math.min(pos, state.rooms.length), 0, r);
+          if (offset !== undefined) state.offsets[roomId] = offset;
+          state.weeks = weeks;
+          save(); render(); toast('Raum wiederhergestellt');
+        });
+        save(); closeSheet(); render();
+        toast('Raum „' + r.name + '“ gelöscht', 'Rückgängig', { name: 'undo-last' });
         break;
       }
+      case 'week-filter': {
+        ui.weekFilter = el.dataset.filter === 'mine' ? 'mine' : 'all';
+        render();
+        break;
+      }
+      case 'quick-add': {
+        const title = ($('#qa-title').value || '').trim();
+        if (!title) { toast('Bitte zuerst eine Aufgabe eintippen'); break; }
+        const roomId2 = ($('#qa-room') || {}).value;
+        const target = room(roomId2);
+        if (!target) break;
+        const def = state.quickDefaults || { freq: 'w', p: 1 };
+        target.tasks.push({ id: uid('t'), title, freq: def.freq, p: clampPoints(def.p) });
+        save(); render();
+        const inp = $('#qa-title');
+        if (inp) inp.value = '';
+        toast('Aufgabe "' + title + '" angelegt ✓');
+        break;
+      }
+      case 'ics-export': exportIcs(currentIndex()); break;
       case 'plan-tab': ui.planTab = el.dataset.tab; render(); break;
       case 'goto-members': ui.view = 'plan'; ui.planTab = 'members'; render(); break;
       case 'goto-rooms': ui.view = 'plan'; ui.planTab = 'rooms'; render(); break;
@@ -1393,7 +1651,13 @@
   });
 
   document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet();
+    if (ev.key === 'Escape' && !$('#sheet').hidden) { closeSheet(); return; }
+    // Enter in der Schnellerfassung legt die Aufgabe an
+    if (ev.key === 'Enter' && ev.target && ev.target.id === 'qa-title') {
+      ev.preventDefault();
+      const btn = document.querySelector('[data-action="quick-add"]');
+      if (btn) btn.click();
+    }
   });
 
   $('#userbtn').addEventListener('click', sheetPickUser);
@@ -1435,13 +1699,8 @@
   }
 
   function exportFile() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = (state.wgName || 'wg-putzplan').replace(/[^\w\-äöüÄÖÜß ]/g, '').replace(/\s+/g, '-') + '.json';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    downloadFile((state.wgName || 'wg-putzplan').replace(/[^\w\-äöüÄÖÜß ]/g, '').replace(/\s+/g, '-') + '.json',
+      JSON.stringify(state, null, 2), 'application/json');
     toast('Datei gespeichert ✓');
   }
 
