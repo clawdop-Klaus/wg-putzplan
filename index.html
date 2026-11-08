@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WG-Putzplan</title>
+<meta name="description" content="Putzplan, Turnus und Aufgabenverteilung für WGs – offline nutzbar, auf iPhone und Android installierbar.">
+
+<meta name="theme-color" content="#4f6df5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c101c" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Putzplan">
+<meta name="format-detection" content="telephone=no">
+
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div class="app">
+  <header class="appbar" id="appbar">
+    <div class="appbar__top">
+      <div class="appbar__title">
+        <h1 id="wg-name">WG-Putzplan</h1>
+        <p id="week-sub">Lädt …</p>
+      </div>
+      <button class="userbtn" id="userbtn" aria-label="Aktive Person wählen">
+        <span class="avatar" id="user-avatar">–</span>
+      </button>
+    </div>
+    <div class="weeknav" id="weeknav">
+      <button class="iconbtn" data-action="prev-week" aria-label="Vorherige Woche">‹</button>
+      <button class="weeknav__label" data-action="this-week" id="week-label">Diese Woche</button>
+      <button class="iconbtn" data-action="next-week" aria-label="Nächste Woche">›</button>
+    </div>
+  </header>
+
+  <main class="main" id="main" tabindex="-1"></main>
+
+  <nav class="tabbar" id="tabbar" aria-label="Hauptnavigation">
+    <button class="tab" data-view="week"><span class="tab__ico">🧹</span><span>Woche</span></button>
+    <button class="tab" data-view="plan"><span class="tab__ico">🗓️</span><span>Turnus</span></button>
+    <button class="tab" data-view="stats"><span class="tab__ico">📊</span><span>Statistik</span></button>
+    <button class="tab" data-view="more"><span class="tab__ico">⚙️</span><span>Mehr</span></button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet__backdrop" data-action="close-sheet"></div>
+  <div class="sheet__panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet__grip"></div>
+    <div class="sheet__head">
+      <h2 class="sheet__title" id="sheet-title"></h2>
+      <button class="iconbtn sheet__close" data-action="close-sheet" aria-label="Schließen">✕</button>
+    </div>
+    <div class="sheet__body" id="sheet-body"></div>
+    <div class="sheet__actions" id="sheet-actions"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="./app.js"></script>
+</body>
+</html>
