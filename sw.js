@@ -1,5 +1,5 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v2';
+const CACHE = 'wg-putzplan-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -34,6 +34,8 @@ self.addEventListener('message', (e) => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
+/* stale-while-revalidate: sofort aus dem Cache liefern (offline & schnell),
+   im Hintergrund vom Server aktualisieren, damit die nächste Anzeige frisch ist. */
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
@@ -41,15 +43,19 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== location.origin) return;
 
   e.respondWith(
-    caches.match(req).then((hit) => {
-      const net = fetch(req).then((res) => {
+    caches.open(CACHE).then((cache) => {
+      const cached = cache.match(req).then((hit) => hit || null);
+      const network = fetch(req).then((res) => {
         if (res && res.status === 200 && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
+          cache.put(req, res.clone());
         }
         return res;
-      }).catch(() => hit || caches.match('./index.html'));
-      return hit || net;
+      }).catch(() => null);
+
+      return cached.then((hit) => {
+        if (hit) { network; return hit; }        // Hintergrund-Aktualisierung läuft weiter
+        return network.then((res) => res || caches.match('./index.html'));
+      });
     })
   );
 });
