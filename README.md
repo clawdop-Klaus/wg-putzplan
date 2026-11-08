@@ -115,8 +115,14 @@ wg-putzplan/
 ├── app.js                Logik: Turnus, Aufgaben, Punkte, Teilen
 ├── manifest.webmanifest  App-Manifest (Name, Icons, Standalone)
 ├── sw.js                 Service Worker (Offline)
-└── icons/                Icons 192/512, Maskable, Apple-Touch, Favicon
+├── icons/                Icons 192/512, Maskable, Apple-Touch, Favicon
+└── server-worker.js      Quelltext des Sync-Servers (Cloudflare Worker + R2)
 ```
+
+Der Sync-Server ist ein eigenständiger Cloudflare Worker mit einem R2-Bucket als Speicher.
+Wer den Live-Sync nicht über `wg-putzplan-sync.wg-putzplan.workers.dev` nutzen möchte,
+deployt `server-worker.js` auf den eigenen Worker (`wrangler deploy`) und trägt dessen Adresse
+im Feld *Server* ein. Nötige Bindung: ein R2-Bucket mit dem Namen `PLANS`.
 
 ## Updates & Zwischenspeicher
 
