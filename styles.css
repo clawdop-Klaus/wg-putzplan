@@ -460,3 +460,28 @@ html,body,.main{overflow-anchor:none}
 .quickadd .btn{flex:0 0 auto;padding:0 16px;font-size:18px;line-height:1}
 
 .weeknav .iconbtn{font-size:16px}
+
+/* =========================================================
+   Live-Sync
+   ========================================================= */
+.switch{display:flex;align-items:center;gap:11px;padding:9px 0;cursor:pointer;font-size:14.5px;font-weight:600}
+.switch input{position:absolute;opacity:0;pointer-events:none}
+.switch__ui{
+  width:44px;height:26px;border-radius:99px;background:var(--surface-3);
+  border:1px solid var(--line);position:relative;flex-shrink:0;transition:background .18s;
+}
+.switch__ui::after{
+  content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+  background:var(--surface);box-shadow:var(--shadow-sm);transition:transform .18s;
+}
+.switch input:checked + .switch__ui{background:var(--accent);border-color:transparent}
+.switch input:checked + .switch__ui::after{transform:translateX(18px)}
+
+.syncstatus{
+  margin-top:12px;padding:9px 12px;border-radius:12px;font-size:13px;font-weight:600;
+  background:var(--surface-2);color:var(--muted);border:1px solid var(--line);
+}
+.syncstatus--ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.syncstatus--fehler{background:#ffe4ea;color:var(--danger);border-color:transparent}
+html[data-theme="dark"] .syncstatus--fehler{background:#3a1522}
+.syncstatus--arbeitet{background:var(--accent-soft);color:var(--accent);border-color:transparent}

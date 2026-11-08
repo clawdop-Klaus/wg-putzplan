@@ -10,7 +10,7 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 | **Woche** | Alle Räume mit Aufgabenliste, Filter „Meine Aufgaben“, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Schnellerfassung, Kalender-Export, Notizen pro Raum, „Alles erledigt“ |
 | **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, feste oder wechselnde Raumzuordnung, automatische Verteilung, Aufgaben & Räume verwalten |
 | **Statistik** | Punkte pro Person, Fairness-Kennzahl, Auslastung der nächsten 4 Wochen, Aktivität der letzten 8 Wochen, Zustand je Raum |
-| **Mehr** | WG-Name, Hell/Dunkel, Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
+| **Mehr** | WG-Name, Hell/Dunkel, **Live-Sync** (Cloudflare), Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
 
 ### Die wichtigsten Bedienknöpfe
 
@@ -126,9 +126,38 @@ Version vom Server (stale-while-revalidate) – wer die App bereits installiert 
 Updates also automatisch, ohne sie neu zu installieren. Erscheint oben ein Balken
 „Neue Version verfügbar", genügt ein Klick.
 
+## Live-Sync (optional)
+
+Damit sich die WG nicht mehr Codes schicken muss, gibt es einen **Live-Sync**: Alle Geräte
+teilen sich denselben Stand automatisch.
+
+* **Einrichtung (einmalig):** Unter *Mehr* → *Live-Sync* auf **„Neu“** klicken (erzeugt einen
+  zufälligen WG-Schlüssel), **Live-Sync aktiv** einschalten, fertig.
+* **Weitergeben:** Den WG-Schlüssel den anderen mitteilen (Chat, SMS …). Wer ihn eintippt,
+  sieht ab sofort denselben Plan – und Änderungen fließen in beide Richtungen.
+* **Technik:** Ein Cloudflare Worker (`https://wg-putzplan-sync.wg-putzplan.workers.dev`)
+  speichert den Plan in einem R2-Bucket. Die App fragt beim Start und danach alle 30 Sekunden
+  ab, Änderungen werden gebündelt (1,2 s) hochgeladen.
+* **Ende-zu-Ende-Verschlüsselung:** Der Plan wird im Gerät mit AES-GCM verschlüsselt (Schlüssel
+  aus dem WG-Schlüssel abgeleitet). Auf dem Server liegt nur Chiffretext – weder Cloudflare noch
+  der WG-Schlüssel-Besitzer sieht den Klartext ohne Passphrase. Für Geräte ohne
+  WebCrypto-Unterstützung gibt es die Option, unverschlüsselt zu synchronisieren.
+* **Eigene Installation:** Server-Adresse ist frei wählbar (Feld *Server*) – wer keinen
+  Cloudflare-Zugang teilen will, trägt dort die eigene Adresse ein.
+
+> **Wichtig:** Der WG-Schlüssel ist das einzige Zugangsmittel. Wer ihn verliert, kann den
+> gespeicherten Plan nicht mehr öffnen – dann muss die WG neu aufsetzen (in *Mehr* auf
+> *Zurücksetzen* und einen neuen Schlüssel erzeugen).
+
 ## Datenschutz
 
-Die App speichert **nur lokal** im `localStorage` des Geräts: Mitglieder, Räume, Aufgaben und
-Erledigtes. Es werden keine Daten an einen Server übertragen, keine Konten angelegt, keine
-Analyse- oder Tracking-Skripte eingebunden. Beim Teilen per Code verlässt der Stand nur
-bewusst das Gerät (als Text/Link).
+Ohne Live-Sync speichert die App **nur lokal** im `localStorage` des Geräts: Mitglieder, Räume,
+Aufgaben und Erledigtes. Es werden keine Daten an einen Server übertragen, keine Konten
+angelegt, keine Analyse- oder Tracking-Skripte eingebunden. Beim Teilen per Code verlässt der
+Stand nur bewusst das Gerät (als Text/Link).
+
+**Mit aktiviertem Live-Sync** wird der (verschlüsselte) Plan auf einem Cloudflare-Worker in
+einem R2-Bucket gespeichert – nur solange der Live-Sync eingeschaltet ist. Die App sendet
+dabei weder WG-Name noch Mitglieder-Namen im Klartext, wenn die Ende-zu-Ende-Verschlüsselung
+aktiv ist. Der Server kennt nur einen Hash des WG-Schlüssels (als Zugriffstoken) und den
+Chiffretext.

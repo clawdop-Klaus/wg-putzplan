@@ -114,6 +114,7 @@
   function save() {
     state.updatedAt = Date.now();
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { toast('Speichern nicht möglich'); }
+    schedulePush();
   }
 
   /* =========================================================
@@ -403,6 +404,163 @@
     const name = (state.wgName || 'wg-putzplan').replace(/[^\w\-äöüÄÖÜß ]/g, '').replace(/\s+/g, '-');
     downloadFile(name + '-' + weekKey(idx) + '.ics', buildIcs(idx), 'text/calendar;charset=utf-8');
     toast('Kalenderdatei erzeugt 📅');
+  }
+
+
+  /* =========================================================
+     Live-Sync (Cloudflare Worker + R2), Ende-zu-Ende verschlüsselt
+     ========================================================= */
+  const SYNC_DEFAULT_URL = 'https://wg-putzplan-sync.wg-putzplan.workers.dev';
+
+  function syncCfg() {
+    if (!state.sync) state.sync = { enabled: false, url: SYNC_DEFAULT_URL, key: '', enc: true, status: 'aus', lastSync: 0, error: '' };
+    if (!state.sync.url) state.sync.url = SYNC_DEFAULT_URL;
+    if (state.sync.enc === undefined) state.sync.enc = true;
+    return state.sync;
+  }
+  function syncReady() {
+    const c = syncCfg();
+    return !!(c.enabled && c.key && c.url);
+  }
+  function newWgKey() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) out += alphabet[bytes[i] % alphabet.length];
+    return out;
+  }
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  async function aesKeyFrom(key) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: new TextEncoder().encode('wg-putzplan-e2e-v1'), iterations: 120000, hash: 'SHA-256' },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+  function b64(buf) {
+    const b = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  function unb64(str) {
+    const bin = atob(str);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  // Der Server sieht nur Chiffretext – WG-Schlüssel und Person sind nie Teil des Payloads.
+  function planPayload() {
+    const s = JSON.parse(JSON.stringify(state));
+    delete s.sync;
+    delete s.currentUser;
+    return s;
+  }
+  async function encryptPayload(obj) {
+    const c = syncCfg();
+    if (!c.enc) return { plain: obj };
+    const key = await aesKeyFrom(c.key);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = new TextEncoder().encode(JSON.stringify(obj));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
+    return { v: 1, iv: b64(iv), ct: b64(ct) };
+  }
+  async function decryptPayload(payload) {
+    if (!payload) return null;
+    if (payload.plain) return payload.plain;
+    if (!payload.ct) return null;
+    const c = syncCfg();
+    const key = await aesKeyFrom(c.key);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(payload.iv) }, key, unb64(payload.ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  function fingerprint(obj) {
+    const s = JSON.stringify(obj);
+    let h = 0;
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return s.length + ':' + h;
+  }
+  let syncing = false, syncPushTimer = null, serverFp = null;
+
+  function setSyncStatus(status, text) {
+    const c = syncCfg();
+    c.status = status;
+    c.error = status === 'fehler' ? (text || '') : '';
+    if (status === 'ok') c.lastSync = Date.now();
+    const el = document.getElementById('syncstatus');
+    if (el) {
+      el.className = 'syncstatus syncstatus--' + status;
+      el.textContent = text || status;
+    }
+  }
+  function schedulePush() {
+    if (!syncReady()) return;
+    clearTimeout(syncPushTimer);
+    syncPushTimer = setTimeout(() => { syncCycle(false); }, 1200);
+  }
+  async function syncCycle(pushOnly, force) {
+    const c = syncCfg();
+    if (syncing) return;
+    if (!force && !c.enabled) return;
+    if (!c.key || !c.url) return;
+    syncing = true;
+    try {
+      setSyncStatus('arbeitet', 'Synchronisiere …');
+      const auth = 'Bearer ' + (await sha256Hex('wg-putzplan-auth:' + c.key));
+      if (!pushOnly) {
+        const res = await fetch(c.url.replace(/\/$/, '') + '/plan', { headers: { Authorization: auth } });
+        if (res.status === 404) {
+          serverFp = null;                     // noch kein Plan vorhanden -> gleich hochladen
+        } else if (res.ok) {
+          let remote = null;
+          try {
+            remote = await decryptPayload(await res.json());
+          } catch (e) {
+            // Fremder Schlüssel oder beschädigte Daten: eigener Stand wird einfach hochgeladen
+            remote = null;
+          }
+          if (remote) {
+            serverFp = fingerprint(remote);
+            const merged = mergeState(state, remote);
+            if (fingerprint(merged) !== fingerprint(state)) {
+              state = merged;
+              save();
+              render();
+            }
+          } else {
+            serverFp = null;
+          }
+        } else if (res.status === 401) {
+          setSyncStatus('fehler', 'Zugriff verweigert – Schlüssel oder Server falsch?');
+          return;
+        }
+      }
+      const fp = fingerprint(planPayload());
+      if (fp !== serverFp) {
+        const payload = await encryptPayload(planPayload());
+        const put = await fetch(c.url.replace(/\/$/, '') + '/plan', {
+          method: 'PUT',
+          headers: { Authorization: auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!put.ok) throw new Error('Server antwortet mit ' + put.status);
+        serverFp = fp;
+        setSyncStatus('ok', 'Synchronisiert ' + new Date().toLocaleTimeString('de-DE'));
+      } else {
+        setSyncStatus('ok', 'Synchronisiert ' + new Date().toLocaleTimeString('de-DE'));
+      }
+    } catch (e) {
+      setSyncStatus('fehler', 'Sync-Fehler: ' + (e && e.message ? e.message : e));
+    } finally {
+      syncing = false;
+    }
   }
 
   /* ---------- App-Badge: offene eigene Aufgaben ---------- */
@@ -817,7 +975,7 @@
       html += '<div style="margin-bottom:10px"><div style="display:flex;gap:9px;align-items:center">' +
         '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' +
         '<strong style="flex:1;font-size:14px">' + esc(m.name) + '</strong>' +
-        '<span style="font-size:13px;color:var(--muted)">' + load[m.id].rooms + '× dran · ' + plural(load[m.id].tasks, 'Aufgabe', 'Aufgaben') + '</span></div>' +
+        '<span style="font-size:13px;color:var(--muted)">Räume · ' + load[m.id].rooms + ' · ' + plural(load[m.id].tasks, 'Aufgabe', 'Aufgaben') + '</span></div>' +
         '<div class="bar"><div class="bar__fill" style="width:' + Math.round((load[m.id].tasks / maxLoad) * 100) + '%;background:' + m.color + '"></div></div>' +
         '</div>';
     });
@@ -847,6 +1005,32 @@
     html += '<div class="card"><div class="card__head"><h3>Erscheinungsbild</h3></div><div class="segmented">' +
       ['auto', 'light', 'dark'].map((t) => '<button data-action="theme" data-theme="' + t + '" class="' + (state.theme === t ? 'is-active' : '') + '">' +
         (t === 'auto' ? 'Automatisch' : t === 'light' ? 'Hell' : 'Dunkel') + '</button>').join('') + '</div></div>';
+
+    // ---- Live-Sync (Cloudflare) ----
+    const sc = syncCfg();
+    html += '<div class="card"><div class="card__head"><h3>Live-Sync</h3>' +
+      '<span class="pill ' + (sc.status === 'ok' ? 'pill--ok' : (sc.status === 'fehler' ? 'pill--danger' : '')) + '" id="syncbadge">' +
+      (sc.status === 'ok' ? 'verbunden' : (sc.status === 'fehler' ? 'Fehler' : 'aus')) + '</span></div>' +
+      '<p class="hint" style="margin:-2px 0 12px">Alle Geräte der WG teilen sich dann denselben Stand automatisch – ohne Code kopieren. ' +
+      'Der WG-Schlüssel bleibt nur auf den Geräten; gespeichert wird verschlüsselt.</p>' +
+      '<div class="field"><label>Server</label><input class="input" id="sync-url" value="' + esc(sc.url) + '" placeholder="' + SYNC_DEFAULT_URL + '"></div>' +
+      '<div class="field"><label>WG-Schlüssel</label>' +
+      '<div class="row" style="gap:8px;border:0;padding:0">' +
+      '<input class="input" id="sync-key" type="password" value="' + esc(sc.key) + '" placeholder="z. B. XKQ7…" style="flex:1">' +
+      '<button class="btn btn--sm" data-action="sync-genkey">Neu</button></div>' +
+      '<p class="hint" style="margin-top:6px">Diesen Schlüssel den anderen WG-Mitgliedern geben – wer ihn hat, kommt an den Plan.</p></div>' +
+      '<label class="switch"><input type="checkbox" id="sync-enc" ' + (sc.enc ? 'checked' : '') + '><span class="switch__ui"></span>' +
+      '<span>Ende-zu-Ende-Verschlüsselung (empfohlen)</span></label>' +
+      '<label class="switch"><input type="checkbox" id="sync-on" ' + (sc.enabled ? 'checked' : '') + '><span class="switch__ui"></span>' +
+      '<span>Live-Sync aktiv</span></label>' +
+      '<div id="syncstatus" class="syncstatus syncstatus--' + sc.status + '">' +
+      (sc.status === 'fehler' && sc.error ? esc(sc.error) : (sc.lastSync ? 'Zuletzt synchronisiert: ' + new Date(sc.lastSync).toLocaleString('de-DE') : 'Noch nicht synchronisiert')) +
+      '</div>' +
+      '<div class="row" style="border:0;gap:8px;margin-top:10px">' +
+      '<button class="btn" data-action="sync-test" style="flex:1">Verbindung testen</button>' +
+      '<button class="btn btn--primary" data-action="sync-now" style="flex:1">Jetzt synchronisieren</button></div>' +
+      '<p class="hint" style="margin-top:10px">Hinweis: Der Server liegt bei Cloudflare (R2). Kostenlos, aber pro WG ist der Schlüssel das einzige Zugangsmittel – verloren heißt: neu aufsetzen.</p>' +
+      '</div>';
 
     html += '<div class="card"><div class="card__head"><h3>Daten teilen & sichern</h3></div>' +
       '<p class="hint">Ohne Konto: Der Stand liegt auf jedem Gerät. Mit einem Code bringst du ihn zu den anderen – oder per Datei auf den Rechner.</p>' +
@@ -1574,6 +1758,61 @@
         break;
       }
       case 'ics-export': exportIcs(currentIndex()); break;
+      /* ---------- Live-Sync ---------- */
+      case 'sync-genkey': {
+        const k = newWgKey();
+        const inp = $('#sync-key');
+        if (inp) { inp.value = k; inp.type = 'text'; }
+        syncCfg().key = k;
+        save();
+        toast('Neuer WG-Schlüssel erzeugt – teile ihn mit der WG');
+        break;
+      }
+      case 'sync-save': {
+        const sc2 = syncCfg();
+        sc2.url = ($('#sync-url') || {}).value || SYNC_DEFAULT_URL;
+        sc2.key = (($('#sync-key') || {}).value || '').trim();
+        sc2.enc = !!(($('#sync-enc') || {}).checked);
+        save();
+        render();
+        toast('Sync-Einstellungen gespeichert');
+        break;
+      }
+      case 'sync-toggle': {
+        const sc2 = syncCfg();
+        sc2.enabled = !!(($('#sync-on') || {}).checked);
+        if (sc2.enabled && !sc2.key) {
+          toast('Bitte zuerst einen WG-Schlüssel eintragen oder erzeugen');
+          sc2.enabled = false;
+          save(); render();
+          break;
+        }
+        save(); render();
+        if (sc2.enabled) { setSyncStatus('arbeitet', 'Verbinde …'); syncCycle(false); }
+        break;
+      }
+      case 'sync-now': {
+        const sc2 = syncCfg();
+        sc2.url = ($('#sync-url') || {}).value || SYNC_DEFAULT_URL;
+        sc2.key = (($('#sync-key') || {}).value || '').trim();
+        sc2.enc = !!(($('#sync-enc') || {}).checked);
+        save();
+        if (!sc2.key) { toast('Kein WG-Schlüssel hinterlegt'); break; }
+        setSyncStatus('arbeitet', 'Synchronisiere …');
+        syncCycle(false, true);
+        break;
+      }
+      case 'sync-test': {
+        const sc2 = syncCfg();
+        const url = (($('#sync-url') || {}).value || '').replace(/\/$/, '');
+        if (!url) { toast('Keine Server-Adresse'); break; }
+        setSyncStatus('arbeitet', 'Teste Verbindung …');
+        fetch(url + '/health').then((r) => {
+          if (r.ok) setSyncStatus('ok', 'Server erreichbar ✓');
+          else setSyncStatus('fehler', 'Server antwortet mit ' + r.status);
+        }).catch((e) => setSyncStatus('fehler', 'Nicht erreichbar: ' + e.message));
+        break;
+      }
       case 'plan-tab': ui.planTab = el.dataset.tab; render(); break;
       case 'goto-members': ui.view = 'plan'; ui.planTab = 'members'; render(); break;
       case 'goto-rooms': ui.view = 'plan'; ui.planTab = 'rooms'; render(); break;
@@ -1649,6 +1888,29 @@
       case 'close-sheet': closeSheet(); break;
     }
   });
+
+  // Formular-Felder des Live-Sync sofort übernehmen (beim Tippen und beim Verlassen)
+  function onSyncField(ev) {
+    const el = ev.target;
+    if (!el || !el.id) return;
+    const sc = syncCfg();
+    if (el.id === 'sync-url') { sc.url = el.value.trim() || SYNC_DEFAULT_URL; save(); }
+    else if (el.id === 'sync-key') { sc.key = el.value.trim(); save(); }
+    else if (el.id === 'sync-enc') { sc.enc = !!el.checked; save(); }
+    else if (el.id === 'sync-on') {
+      sc.enabled = !!el.checked;
+      if (sc.enabled && !sc.key) {
+        toast('Bitte zuerst einen WG-Schlüssel eintragen');
+        sc.enabled = false;
+        save(); render();
+        return;
+      }
+      save(); render();
+      if (sc.enabled) { setSyncStatus('arbeitet', 'Verbinde …'); syncCycle(false); }
+    }
+  }
+  document.addEventListener('input', onSyncField);
+  document.addEventListener('change', onSyncField);
 
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && !$('#sheet').hidden) { closeSheet(); return; }
@@ -1791,6 +2053,14 @@
   /* ---------- Start ---------- */
   render();
   applyHashCode();
+  // Live-Sync: beim Start einmal abholen, danach regelmäßig
+  if (syncReady()) { setTimeout(() => syncCycle(false), 800); }
+  setInterval(() => {
+    if (syncReady() && document.visibilityState === 'visible') syncCycle(false);
+  }, 30000);
+  document.addEventListener('visibilitychange', function () {
+    if (syncReady() && document.visibilityState === 'visible') syncCycle(false);
+  });
 
   window.addEventListener('storage', function (ev) {
     if (ev.key === STORAGE_KEY) { state = load(); render(); }
