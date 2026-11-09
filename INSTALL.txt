@@ -208,6 +208,49 @@ sieht den Plan wieder.
 
 
 ================================================================================
+6. AUFGABEN ANLEGEN: WIE OFT UND WER
+================================================================================
+
+Unter "Turnus" -> "Räume" -> Raum antippen -> "+ Aufgabe in <Raum>".
+
+WIE OFT (Feld "Wie oft?")
+    Zwei Felder: eine Zahl und die Einheit.
+
+        [ 1 ] [ Tag      ]   ->  taeglich
+        [ 3 ] [ Tag      ]   ->  alle 3 Tage
+        [ 1 ] [ Woche    ]   ->  woechentlich
+        [ 2 ] [ Woche    ]   ->  alle 2 Wochen
+        [ 1 ] [ Monat    ]   ->  monatlich
+        [ 3 ] [ Monat    ]   ->  alle 3 Monate
+
+    Der Hinweis unter den Feldern zeigt sofort, was daraus wird.
+
+    - TAEGLICH und "alle x Tage": In der Wochenansicht steht die Aufgabe an
+      jedem passenden Wochentag (Mo, Di, Mi ...) in einer eigenen Zeile. Jede
+      Zeile laesst sich einzeln abhaken, und jeder abgehakte Tag zaehlt als
+      eine Erledigung mit den Punkten der Aufgabe.
+    - "Alle x Wochen" und "alle x Monate": Die Aufgabe faellt nur in jedem
+      x-ten Termin auf - sie steht also nicht jede Woche in der Liste.
+
+WER IST DAFUER ZUSTAENDIG (Feld "Zustandig")
+    - "wie der Raum (Turnus)": Standard. Wer in dieser Woche den Raum hat,
+      erledigt die Aufgabe.
+    - Ein Name: Die Aufgabe ist fest dieser Person zugeteilt. Sie steht dann
+      jede Woche bei ihr, auch wenn der Raumturnus woanders liegt. In der
+      Wochenansicht steht "immer <Name>" bei der Aufgabe.
+
+PUNKTE
+    1 bis 4 Punkte. Ein Punkt fuer "Geschirr abwaschen", vier Punkte fuer
+    "Bad komplett putzen". Punkte zaehlen fuer die Person, die die Aufgabe
+    erledigt hat - bei taeglichen Aufgaben also je abgehaktem Tag.
+
+TIPP
+    Schnell anlegen: unten in der Wochenansicht "Schnell Aufgabe anlegen".
+    Haeufigkeit und Punkte werden von der zuletzt angelegten Aufgabe
+    uebernommen.
+
+
+================================================================================
 Kurz in vier Schritten
 ================================================================================
 
