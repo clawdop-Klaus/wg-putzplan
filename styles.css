@@ -485,3 +485,68 @@ html,body,.main{overflow-anchor:none}
 .syncstatus--fehler{background:#ffe4ea;color:var(--danger);border-color:transparent}
 html[data-theme="dark"] .syncstatus--fehler{background:#3a1522}
 .syncstatus--arbeitet{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+
+/* ---------- Bestätigung („Danke") an erledigten Aufgaben ---------- */
+.task__thanks{
+  font-size:11.5px;font-weight:650;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:99px;
+  padding:4px 9px;cursor:pointer;flex-shrink:0;line-height:1.2;
+}
+.task__thanks.is-on{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.task__thanks--own{background:transparent;border-color:transparent;cursor:default}
+.task__thanks:active{transform:scale(.94)}
+
+/* ---------- Wochentage für die Erinnerung ---------- */
+.daypick{display:flex;gap:6px;flex-wrap:wrap}
+.daypick__day{
+  border:1px solid var(--line);background:var(--surface);color:var(--text);
+  border-radius:10px;padding:7px 11px;font-size:13px;font-weight:700;cursor:pointer;min-width:38px;
+}
+.daypick__day.is-on{background:var(--accent);border-color:transparent;color:#fff}
+.daypick__day:active{transform:scale(.94)}
+
+/* ---------- Druckansicht ---------- */
+.print-head h2{margin:0 0 2px;font-size:19px}
+.print-head p{margin:0;color:var(--muted);font-size:13px}
+.print-room{padding:0}
+.print-room__head{
+  display:flex;align-items:baseline;gap:10px;padding:11px 14px 6px;
+  border-bottom:1px solid var(--line);
+}
+.print-room__head strong{font-size:15px}
+.print-room__head span{font-size:12.5px;color:var(--muted);margin-left:auto}
+.print-tasks{list-style:none;margin:0;padding:6px 0}
+.print-tasks li{
+  display:flex;align-items:center;gap:10px;padding:6px 14px;font-size:14px;
+}
+.print-box{
+  width:18px;height:18px;border:1.5px solid var(--line);border-radius:5px;
+  display:grid;place-items:center;font-size:12px;color:#fff;flex-shrink:0;
+}
+.print-box.is-done{background:var(--ok);border-color:var(--ok)}
+.print-task{flex:1;min-width:0}
+.print-pts{font-size:11.5px;color:var(--muted);font-weight:700}
+.print-by{font-size:11.5px;color:var(--muted);min-width:76px;text-align:right}
+
+/* ---------- Tastaturbedienung: sichtbarer Fokus ---------- */
+:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;border-radius:8px;
+}
+@media (prefers-reduced-motion:reduce){}
+
+/* ---------- Druck (PDF) ---------- */
+@media print{
+  html,body{background:#fff !important;color:#000 !important}
+  .tabbar,.topbar,.updatebar,.toast,.sheet,.no-print,#sheet{display:none !important}
+  body{padding:0 !important}
+  .card{
+    box-shadow:none !important;border:1px solid #bbb !important;
+    break-inside:avoid;page-break-inside:avoid;margin:0 0 10px !important;
+  }
+  .print-tasks li{font-size:12pt}
+  .print-room__head{background:#f2f2f2}
+  .print-box{border-color:#666}
+  .print-box.is-done{background:#ddd !important;color:#000 !important;border-color:#666}
+  .print-head h2{font-size:16pt}
+  @page{margin:14mm}
+}

@@ -9,8 +9,8 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 |---|---|
 | **Woche** | Alle Räume mit Aufgabenliste, Filter „Meine Aufgaben“, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Schnellerfassung, Kalender-Export, Notizen pro Raum, „Alles erledigt“ |
 | **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, feste oder wechselnde Raumzuordnung, automatische Verteilung, Aufgaben & Räume verwalten |
-| **Statistik** | Punkte pro Person, Fairness-Kennzahl, Auslastung der nächsten 4 Wochen, Aktivität der letzten 8 Wochen, Zustand je Raum |
-| **Mehr** | WG-Name, Hell/Dunkel, **Live-Sync** (Cloudflare), **Erinnerungen** (Web-Push), Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
+| **Statistik** | Punkte pro Person, Fairness-Kennzahl, **Fleißwoche** (Bestätigungen), **Pünktlichkeit**, Auslastung der nächsten 4 Wochen, Aktivität der letzten 8 Wochen, Zustand je Raum |
+| **Mehr** | WG-Name, Hell/Dunkel, **Live-Sync** (Cloudflare), **Erinnerungen** (Web-Push), **Abwesenheiten**, **Einladungs-Link mit QR**, **Schlüssel sichern**, **Speicher dauerhaft behalten**, Impressum/Datenschutz, Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
 
 ### Die wichtigsten Bedienknöpfe
 
@@ -53,6 +53,51 @@ Alternativ: **Als Datei sichern / Datei einlesen** (JSON) für Backups.
 Zusätzlich kann der Stand als Link (`…/#s=…`) geteilt werden – beim Öffnen fragt die App,
 ob der Plan übernommen werden soll.
 
+### Fleißwoche: Anerkennung statt Rangliste
+
+* Erledigte Aufgaben anderer lassen sich mit **🤝 Danke** bestätigen (Tipp: neben dem Namen
+  der erledigten Person). Das ist reine Anerkennung – **kein Punkt, kein Rang, kein Geld**.
+* Unter *Statistik → Fleißwoche* steht für die Woche, wie viele Bestätigungen wer bekommen hat
+  und wer pünktlich war. Es gibt bewusst **keine Gesamtrangliste** und keine Minuspunkte.
+* **Pünktlichkeit** zeigt, wie viele Aufgaben in der fälligen Woche erledigt wurden und wie viele
+  später nachgetragen wurden. Das ist wichtig: Punkte steigen auch dann, wenn jemand fehlt –
+  nur die Pünktlichkeit trennt „viel gemacht“ von „pünktlich gemacht“.
+* **Abwesenheiten** (Mehr → Abwesenheiten): Urlaub oder Krankheit eintragen. Für diese Wochen
+  pausieren die Punkte, damit Fairness und Belohnung nicht verzerrt werden.
+* Die Auswertung bleibt vollständig auf dem Gerät – sie wird nicht an den Server geschickt
+  (außer der normale Live-Sync, der ohnehin nur Chiffretext überträgt).
+
+### Druckansicht und PDF
+
+Unten in der Wochenansicht: **🖨 Plan drucken (PDF)**. Die Ansicht ist für die Pinnwand
+gedacht (große Schrift, Kästchen zum Abhaken). Im Druckdialog „Als PDF speichern“ wählen –
+so lässt sich der Wochenplan als PDF an die WG schicken.
+
+### Einladungs-Link mit QR-Code
+
+*Mehr → Daten teilen & sichern → Einladungs-Link (QR)* erzeugt einen Link
+(`…/#wg=SCHLÜSSEL`) mit QR-Code. Der QR-Code wird **vollständig im Browser erzeugt**
+(`qr.js`, MIT-Lizenz, siehe `qr-license.txt`) – der Schlüssel geht an keinen externen Dienst.
+* Wer den Link öffnet, bekommt die Abfrage „Einladung annehmen?“ und sieht danach denselben Plan.
+* Der Schlüssel steht nur im Fragment der Adresse (nach `#`) – er wird nie an einen Server geschickt.
+
+### Speicher & Schlüssel
+
+* **Speicher dauerhaft behalten** (Mehr): fragt den Browser, ob der lokale Speicher geschützt
+  werden soll. Ohne das kann der Browser die Daten bei Platzmangel löschen.
+* **WG-Schlüssel sichern**: legt eine Textdatei mit dem Schlüssel an – als Backup, falls das
+  Gerät weg ist.
+
+### Erinnerungen nach Wochentag
+
+Unter *Mehr → Erinnerungen* lässt sich zusätzlich zur Uhrzeit einstellen, an **welchen Tagen**
+die tägliche Erinnerung kommen soll (z. B. nur Montag bis Freitag). Ohne Auswahl: jeden Tag.
+
+### Impressum & Datenschutz
+
+In der App unter *Mehr → Rechtliches* verlinkt. Beide Seiten enthalten Platzhalter
+(`⟨…⟩`) für die Angaben des Betreibers – die müssen vor der Veröffentlichung ausgefüllt werden.
+
 ## Installation aufs Handy
 
 **iPhone / iPad (Safari)**
@@ -73,6 +118,9 @@ jederzeit verfügbar.
 * Reines HTML/CSS/JavaScript, **kein Build-Schritt**, keine Abhängigkeiten.
 * Daten im `localStorage` des Geräts (`wgputzplan.v1`).
 * Service Worker (`sw.js`) für Offline-Betrieb und Push-Empfang, Web App Manifest für die Installation.
+* **Adaptives Abfragen:** der Sync prüft alle 30 s, danach immer seltener (bis 5 min), solange
+  sich nichts ändert. Bei einer Änderung, beim Öffnen der App oder bei einer Push-Nachricht
+  geht es sofort wieder los. Im Hintergrund pausiert das Abfragen ganz.
 * Der Teilen-Code ist Base64 + `deflate-raw` komprimiert (Präfix `WGP1.Z`).
 
 ## Veröffentlichen (GitHub Pages)
@@ -112,7 +160,10 @@ python3 -m http.server 8000
 wg-putzplan/
 ├── index.html            App-Rahmen
 ├── styles.css            Design (Hell/Dunkel, Safe-Area)
-├── app.js                Logik: Turnus, Aufgaben, Punkte, Teilen
+├── app.js                Logik: Turnus, Aufgaben, Punkte, Teilen, Fleißwoche
+├── qr.js                 QR-Code-Erzeugung (lokal, MIT, siehe qr-license.txt)
+├── impressum.html        Impressum (Platzhalter für den Betreiber)
+├── datenschutz.html      Datenschutzerklärung
 ├── manifest.webmanifest  App-Manifest (Name, Icons, Standalone)
 ├── sw.js                 Service Worker (Offline)
 ├── icons/                Icons 192/512, Maskable, Apple-Touch, Favicon

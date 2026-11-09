@@ -43,10 +43,10 @@
   <main class="main" id="main" tabindex="-1"></main>
 
   <nav class="tabbar" id="tabbar" aria-label="Hauptnavigation">
-    <button class="tab" data-view="week"><span class="tab__ico">🧹</span><span>Woche</span></button>
-    <button class="tab" data-view="plan"><span class="tab__ico">🗓️</span><span>Turnus</span></button>
-    <button class="tab" data-view="stats"><span class="tab__ico">📊</span><span>Statistik</span></button>
-    <button class="tab" data-view="more"><span class="tab__ico">⚙️</span><span>Mehr</span></button>
+    <button class="tab" data-view="week" type="button"><span class="tab__ico" aria-hidden="true">🧹</span><span>Woche</span></button>
+    <button class="tab" data-view="plan" type="button"><span class="tab__ico" aria-hidden="true">🗓️</span><span>Turnus</span></button>
+    <button class="tab" data-view="stats" type="button"><span class="tab__ico" aria-hidden="true">📊</span><span>Statistik</span></button>
+    <button class="tab" data-view="more" type="button"><span class="tab__ico" aria-hidden="true">⚙️</span><span>Mehr</span></button>
   </nav>
 </div>
 
@@ -65,6 +65,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="./qr.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>

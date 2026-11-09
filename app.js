@@ -70,6 +70,8 @@
       order: members.map((m) => m.id),
       offsets: computeBalanced(rooms, members.map((m) => m.id), weekIndexOf(new Date())),
       weeks: {},
+      thanks: {},
+      absences: [],
       currentUser: members[0].id,
       theme: 'auto',
       updatedAt: Date.now()
@@ -91,6 +93,8 @@
     s.rooms = Array.isArray(s.rooms) ? s.rooms : [];
     s.members = Array.isArray(s.members) ? s.members : [];
     s.weeks = s.weeks && typeof s.weeks === 'object' ? s.weeks : {};
+    s.thanks = s.thanks && typeof s.thanks === 'object' ? s.thanks : {};
+    s.absences = Array.isArray(s.absences) ? s.absences : [];
     s.offsets = s.offsets && typeof s.offsets === 'object' ? s.offsets : {};
     s.order = Array.isArray(s.order) ? s.order.filter((id) => s.members.some((m) => m.id === id)) : s.members.map((m) => m.id);
     s.members.forEach((m, i) => { if (!m.color) m.color = MEMBER_COLORS[i % MEMBER_COLORS.length]; if (!m.emoji) m.emoji = '🧑'; });
@@ -219,8 +223,12 @@
   }
   function pointsOf(memberId) {
     let p = 0;
-    Object.values(state.weeks).forEach((wk) => {
+    Object.keys(state.weeks).forEach((wkKeyS) => {
+      const wk = state.weeks[wkKeyS];
       if (!wk.done) return;
+      // Wer im Urlaub oder krank war, sammelt in dieser Woche keine Punkte an.
+      const widx = weekIndexFromKey(wkKeyS);
+      if (widx !== null && absenceFor(memberId, widx)) return;
       Object.keys(wk.done).forEach((roomId) => {
         Object.keys(wk.done[roomId]).forEach((taskId) => {
           const e = wk.done[roomId][taskId];
@@ -232,8 +240,11 @@
   }
   function tasksDoneBy(memberId) {
     let n = 0;
-    Object.values(state.weeks).forEach((wk) => {
+    Object.keys(state.weeks).forEach((wkKeyS) => {
+      const wk = state.weeks[wkKeyS];
       if (!wk.done) return;
+      const widx = weekIndexFromKey(wkKeyS);
+      if (widx !== null && absenceFor(memberId, widx)) return;
       Object.keys(wk.done).forEach((roomId) => {
         Object.keys(wk.done[roomId]).forEach((taskId) => {
           if (wk.done[roomId][taskId] && wk.done[roomId][taskId].by === memberId) n++;
@@ -241,6 +252,108 @@
       });
     });
     return n;
+  }
+  /* ---------- Bestätigungen („Danke"), Abwesenheiten, Pünktlichkeit ---------- */
+  function thanksList(roomId, taskId, idx) {
+    const wk = state.thanks[weekKey(idx)];
+    if (!wk || !wk[roomId]) return [];
+    return Array.isArray(wk[roomId][taskId]) ? wk[roomId][taskId] : [];
+  }
+  function toggleThanks(roomId, taskId, idx, memberId) {
+    const wk = weekKey(idx);
+    if (!state.thanks[wk]) state.thanks[wk] = {};
+    if (!state.thanks[wk][roomId]) state.thanks[wk][roomId] = {};
+    const list = thanksList(roomId, taskId, idx).slice();
+    const i = list.indexOf(memberId);
+    if (i >= 0) list.splice(i, 1); else list.push(memberId);
+    state.thanks[wk][roomId][taskId] = list;
+    save();
+  }
+  // Wie oft wurde diese Person in dieser Woche bedankt?
+  function thanksCountFor(memberId, idx) {
+    let n = 0;
+    const wk = state.thanks[weekKey(idx)];
+    if (!wk) return 0;
+    Object.keys(wk).forEach((roomId) => Object.keys(wk[roomId]).forEach((tid) => {
+      const e = doneEntry(roomId, tid, idx);
+      if (e && e.by === memberId) n += (wk[roomId][tid] || []).length;
+    }));
+    return n;
+  }
+  function thanksTotalFor(idx) {
+    let n = 0;
+    const wk = state.thanks[weekKey(idx)];
+    if (!wk) return 0;
+    Object.keys(wk).forEach((roomId) => Object.keys(wk[roomId]).forEach((tid) => {
+      n += (wk[roomId][tid] || []).length;
+    }));
+    return n;
+  }
+  function parseDay(d) {
+    if (!d) return null;
+    const p = String(d).split('-');
+    if (p.length !== 3) return null;
+    const dt = new Date(+p[0], +p[1] - 1, +p[2]);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+  function fmtDay(d) {
+    const x = parseDay(d);
+    if (!x) return '–';
+    return x.getDate() + '.' + (x.getMonth() + 1) + '.' + x.getFullYear();
+  }
+  function absenceOverlaps(a, from, to) {
+    const f = parseDay(a.from), t = parseDay(a.to);
+    if (!f || !t) return false;
+    return f <= to && t >= from;
+  }
+  // Abwesenheit, die die Woche idx betrifft
+  function absenceFor(memberId, idx) {
+    if (!state.absences.length) return null;
+    const s = weekStart(idx);
+    const e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+    return state.absences.find((a) => a.memberId === memberId && absenceOverlaps(a, s, e)) || null;
+  }
+  const ABSENCE_REASON = { urlaub: 'Urlaub', krankheit: 'Krankheit', sonstiges: 'Sonstiges' };
+  // Wochen-Index aus einem Schlüssel wie „2026-W45"
+  function weekIndexFromKey(key) {
+    const m = /^(\d{4})-W(\d{2})$/.exec(key || '');
+    if (!m) return null;
+    const year = +m[1], week = +m[2];
+    if (week < 1 || week > 53) return null;
+    return weekIndexOf(startOfWeek(new Date(year, 0, 4))) + (week - 1);
+  }
+  // Pünktlichkeit: wurde die Aufgabe in der Woche erledigt, in der sie fällig war?
+  function punctualityOf(idx) {
+    const res = {};
+    state.members.forEach((m) => { res[m.id] = { punctual: 0, late: 0 }; });
+    Object.keys(state.weeks).forEach((wk) => {
+      const widx = weekIndexFromKey(wk);
+      if (widx === null || widx !== idx) return;
+      const d = state.weeks[wk].done || {};
+      Object.keys(d).forEach((roomId) => Object.keys(d[roomId]).forEach((tid) => {
+        const e = d[roomId][tid];
+        if (!e || !e.by || !res[e.by]) return;
+        const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
+        if (doneIdx > widx) res[e.by].late++; else res[e.by].punctual++;
+      }));
+    });
+    return res;
+  }
+  function punctualityOverall() {
+    let p = 0, l = 0;
+    Object.keys(state.weeks).forEach((wk) => {
+      const widx = weekIndexFromKey(wk);
+      if (widx === null) return;
+      const d = state.weeks[wk].done || {};
+      Object.keys(d).forEach((roomId) => Object.keys(d[roomId]).forEach((tid) => {
+        const e = d[roomId][tid];
+        if (!e || !e.by) return;
+        const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
+        if (doneIdx > widx) l++; else p++;
+      }));
+    });
+    const t = p + l;
+    return { punctual: p, late: l, pct: t ? Math.round((p * 100) / t) : 0 };
   }
   function weekPointTotal(idx) {
     const w = weekDone(idx);
@@ -298,13 +411,19 @@
     const av = $('#user-avatar');
     av.textContent = cur ? cur.emoji : '👤';
     av.style.background = cur ? cur.color : 'var(--accent)';
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.view === ui.view));
+    document.querySelectorAll('.tab').forEach((t) => {
+      const on = t.dataset.view === ui.view;
+      t.classList.toggle('is-active', on);
+      if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+    });
     const main = $('#main');
     const keepScroll = (ui.view === ui.lastView) ? window.scrollY : 0;
     if (ui.view === 'week') main.innerHTML = viewWeek();
     else if (ui.view === 'plan') main.innerHTML = viewPlan();
     else if (ui.view === 'stats') main.innerHTML = viewStats();
+    else if (ui.view === 'print') main.innerHTML = viewPrint();
     else main.innerHTML = viewMore();
+    document.body.classList.toggle('is-print', ui.view === 'print');
     updateHeader();
     updateBadge();
     // Scroll nur zurücksetzen, wenn die Ansicht wirklich wechselt – sonst springt
@@ -610,11 +729,17 @@
     { v: 15, t: '15:00' }, { v: 17, t: '17:00' }, { v: 19, t: '19:00' }, { v: 21, t: '21:00' }
   ];
   const DEFAULT_PUSH_HOUR = 17;
+  // Wochentage für die tägliche Erinnerung (0 = Sonntag … 6 = Samstag)
+  const PUSH_DAYS = [
+    { v: 1, t: 'Mo' }, { v: 2, t: 'Di' }, { v: 3, t: 'Mi' }, { v: 4, t: 'Do' },
+    { v: 5, t: 'Fr' }, { v: 6, t: 'Sa' }, { v: 0, t: 'So' }
+  ];
 
   function pushCfg() {
     const c = syncCfg();
     if (!c.push) c.push = { enabled: false, url: '', status: 'aus', error: '', sub: null, hour: DEFAULT_PUSH_HOUR };
     if (c.push.hour === undefined) c.push.hour = DEFAULT_PUSH_HOUR;
+    if (!Array.isArray(c.push.days)) c.push.days = [];
     return c.push;
   }
   function pushSupported() {
@@ -679,6 +804,20 @@
       badge.className = 'pill ' + (status === 'aktiv' ? 'pill--ok' : (status === 'fehler' ? 'pill--danger' : ''));
     }
   }
+  // Meldet das aktuelle Abo (mit Stunde, Wochentagen und Zeitzone) beim Server an.
+  async function pushRegister() {
+    const pc = pushCfg();
+    const c = syncCfg();
+    if (!pc.sub || !pc.sub.endpoint) return false;
+    const base = (pc.url || c.url).replace(/\/$/, '');
+    const j = pc.sub.toJSON ? pc.sub.toJSON() : pc.sub;
+    const res = await fetch(base + '/push/sub', {
+      method: 'POST',
+      headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
+    });
+    return !!res.ok;
+  }
   async function pushEnable() {
     const c = syncCfg();
     const pc = pushCfg();
@@ -711,7 +850,7 @@
       const res = await fetch(base + '/push/sub', {
         method: 'POST',
         headers: { Authorization: auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+        body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
       });
       if (!res.ok) throw new Error('Abo konnte nicht gespeichert werden (Status ' + res.status + ')');
       pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv'; pc.auth = auth;
@@ -768,7 +907,7 @@
       await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
         method: 'POST',
         headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+        body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
       });
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.ready.then(function (reg) { pushCredToWorker(reg); }).catch(function () {});
@@ -846,7 +985,7 @@
           await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
             method: 'POST',
             headers: { Authorization: auth, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+            body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
           });
           pc.auth = auth;
         } else if (!pc.auth) {
@@ -857,6 +996,81 @@
       save();
       pushCredToWorker(reg);
     } catch (e) { /* egal */ }
+  }
+
+  /* ---------- Einladungs-Link mit QR-Code ---------- */
+  function shareLink() {
+    const c = syncCfg();
+    if (!c.key) { toast('Zuerst einen WG-Schlüssel anlegen'); return; }
+    const url = location.origin + location.pathname + '#wg=' + encodeURIComponent(c.key);
+    const box = $('#sharebox');
+    if (!box) return;
+    box.innerHTML = '<div style="margin-top:12px"><strong style="font-size:14px">Einladungs-Link</strong>' +
+      '<div class="notice" style="margin-top:6px;word-break:break-all;font-size:12.5px">' + esc(url) + '</div>' +
+      '<div id="qrhost" style="margin-top:10px"></div>' +
+      '<div class="row" style="border:0;gap:8px;margin-top:8px">' +
+      '<button class="btn btn--sm" data-action="copy-share" style="flex:1">Link kopieren</button>' +
+      '<button class="btn btn--sm" data-action="native-share" style="flex:1">Teilen</button></div>' +
+      '<p class="hint" style="margin-top:6px">Der Schlüssel steht nur im Teil des Links – er wird nicht an den Server geschickt.</p></div>';
+    drawQR($('#qrhost'), url);
+    box.dataset.link = url;
+  }
+  function drawQR(host, text) {
+    if (!host) return;
+    try {
+      if (typeof qrcode !== 'undefined') {
+        const qr = qrcode(0, 'M');
+        qr.addData(text);
+        qr.make();
+        host.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+      } else {
+        host.innerHTML = '<p class="hint">QR-Code nicht verfügbar – bitte den Link kopieren.</p>';
+      }
+    } catch (e) {
+      host.innerHTML = '<p class="hint">QR-Code nicht verfügbar – bitte den Link kopieren.</p>';
+    }
+  }
+  /* ---------- WG-Schlüssel sichern ---------- */
+  function backupKey() {
+    const c = syncCfg();
+    if (!c.key) { toast('Kein WG-Schlüssel vorhanden'); return; }
+    const text = 'WG-Putzplan – WG-Schlüssel\n\n' + c.key + '\n\nWer diesen Schlüssel hat, kann den Putzplan sehen und ändern.\n' +
+      'App: ' + location.origin + location.pathname + '\n';
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'wg-putzplan-schluessel.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('Schlüssel-Datei erstellt');
+    } catch (e) {
+      toast('Speichern nicht möglich – bitte den Schlüssel von Hand notieren');
+    }
+  }
+  /* ---------- Speicher dauerhaft behalten ---------- */
+  async function persistStorage() {
+    const info = $('#persistinfo');
+    try {
+      if (!navigator.storage || !navigator.storage.persist) {
+        if (info) info.textContent = 'Dieser Browser kennt keine dauerhafte Speicherung.';
+        return;
+      }
+      let already = false;
+      try { already = await navigator.storage.persisted(); } catch (e) { already = false; }
+      const ok = already ? true : await navigator.storage.persist();
+      if (info) {
+        info.textContent = ok
+          ? '✓ Der Speicher ist dauerhaft – die Daten bleiben auch bei wenig Platz erhalten.'
+          : 'Der Browser hat den dauerhaften Speicher abgelehnt. Daten können bei Platzmangel gelöscht werden – am besten den WG-Schlüssel sichern.';
+      }
+      if (ok) toast('Speicher dauerhaft behalten ✓');
+    } catch (e) {
+      if (info) info.textContent = 'Nicht möglich: ' + (e && e.message ? e.message : e);
+    }
   }
 
   /* ---------- App-Badge: offene eigene Aufgaben ---------- */
@@ -922,6 +1136,8 @@
     }
     shown.forEach((r) => { html += roomCard(r, idx, done); });
     html += quickAddCard(idx);
+    html += '<div class="row no-print" style="gap:8px;margin:4px 0 8px">' +
+      '<button class="btn btn--block" data-action="goto-print">🖨 Plan drucken (PDF)</button></div>';
     return html;
   }
 
@@ -936,7 +1152,7 @@
       state.rooms.map((r) => '<option value="' + r.id + '">' + esc(r.icon || '') + ' ' + esc(r.name) + '</option>').join('') +
       '</select>' +
       '<input class="input" id="qa-title" placeholder="Aufgabe eintippen …">' +
-      '<button class="btn btn--primary" data-action="quick-add">＋</button>' +
+      '<button class="btn btn--primary" data-action="quick-add" aria-label="Aufgabe anlegen">＋</button>' +
       '</div>' +
       '<p class="hint" style="margin-top:8px">Frequenz und Punkte werden von der zuletzt angelegten Aufgabe übernommen – änderbar im Aufgaben-Dialog.</p>' +
       '</div>';
@@ -967,6 +1183,18 @@
       '<text x="32" y="37" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">' + pct + '%</text></svg>';
   }
 
+  // Bestätigung („Danke") für eine erledigte Aufgabe – Ausdruck der Anerkennung,
+  // kein Punkt und kein Rang. Eigen erledigte Aufgaben lassen sich nicht bedanken.
+  function thanksButton(r, t, e, by, idx) {
+    if (!e || !by) return '';
+    if (by.id === state.currentUser) return '<span class="task__thanks task__thanks--own">✓ erledigt</span>';
+    const list = thanksList(r.id, t.id, idx);
+    const mine = list.indexOf(state.currentUser) !== -1;
+    return '<button class="task__thanks' + (mine ? ' is-on' : '') + '" data-action="task-thanks" data-room="' + r.id +
+      '" data-task="' + t.id + '" aria-pressed="' + (mine ? 'true' : 'false') + '" aria-label="' +
+      (mine ? 'Bestätigung zurücknehmen' : 'Für ' + esc(by.name) + ' bedanken') + '">🤝 ' +
+      (list.length ? list.length : 'Danke') + '</button>';
+  }
   function roomCard(r, idx, done) {
     const tasks = dueTasks(r, idx);
     const doneCount = tasks.filter((t) => doneEntry(r.id, t.id, idx)).length;
@@ -1000,6 +1228,7 @@
         '<div class="task__label">' + esc(t.title) +
         (t.freq !== 'w' ? '<div class="task__meta">' + FREQ_LABEL[t.freq] + '</div>' : '') + '</div>' +
         (e && by ? '<div class="task__by"><span class="chip-avatar chip-avatar--sm" style="background:' + by.color + '">' + by.emoji + '</span>' + esc(by.name) + '</div>' : '') +
+        thanksButton(r, t, e, by, idx) +
         '<div class="task__pts">' + clampPoints(t.p) + ' P</div>' +
         '<button class="task__edit" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '" aria-label="Aufgabe bearbeiten">✎</button>' +
         '</div>';
@@ -1014,6 +1243,36 @@
       '</div>';
     if (note) html += '<div style="padding:0 14px 12px"><div class="notice">📝 ' + esc(note) + '</div></div>';
     html += '</section>';
+    return html;
+  }
+
+  /* ---------- Druckansicht (Pinnwand / PDF) ---------- */
+  function viewPrint() {
+    const idx = currentIndex();
+    let html = '<div class="card print-head"><h2>' + esc(state.wgName || 'WG-Putzplan') + '</h2>' +
+      '<p>' + weekLabel(idx) + ' · ' + weekRange(idx) + '</p>' +
+      '<div class="row no-print" style="gap:8px;margin-top:12px">' +
+      '<button class="btn btn--primary" data-action="print-now">🖨 Drucken / als PDF speichern</button>' +
+      '<button class="btn" data-action="goto-week">Zurück</button></div></div>';
+    state.rooms.forEach((r) => {
+      const tasks = dueTasks(r, idx);
+      if (!tasks.length) return;
+      const a2 = assigneeFor(r.id, idx);
+      const m = member(a2);
+      html += '<section class="card print-room"><div class="print-room__head">' +
+        '<strong>' + esc(r.icon || '🧽') + ' ' + esc(r.name) + '</strong>' +
+        '<span>' + (m ? esc(m.emoji + ' ' + m.name) : 'niemand') + '</span></div><ul class="print-tasks">';
+      tasks.forEach((t) => {
+        const e = doneEntry(r.id, t.id, idx);
+        const by = e ? member(e.by) : null;
+        html += '<li><span class="print-box' + (e ? ' is-done' : '') + '">' + (e ? '✓' : '') + '</span>' +
+          '<span class="print-task">' + esc(t.title) + '</span>' +
+          '<span class="print-pts">' + clampPoints(t.p) + ' P</span>' +
+          (by ? '<span class="print-by">' + esc(by.name) + '</span>' : '<span class="print-by"></span>') + '</li>';
+      });
+      html += '</ul></section>';
+    });
+    html += '<p class="hint no-print" style="text-align:center;margin:16px 0 8px">Tipp: Im Druckdialog „Als PDF speichern“ wählen – so kannst du den Plan als PDF an die WG schicken.</p>';
     return html;
   }
 
@@ -1213,6 +1472,33 @@
     });
     html += '</div>';
 
+    // ---- Fleißwoche: Bestätigungen und Pünktlichkeit, bewusst ohne Rangliste ----
+    const pun = punctualityOf(idx);
+    const totalThanks = thanksTotalFor(idx);
+    html += '<div class="card"><div class="card__head"><h3>Fleißwoche</h3><span class="card__sub">' + weekLabel(idx) + '</span></div>';
+    html += '<p class="hint">Bestätigungen sind ein Dank für erledigte Aufgaben – kein Rang, keine Punkte, kein Geld. Die Auswertung bleibt nur auf diesem Gerät.</p>';
+    const named = state.members.slice().sort((a2, b2) => String(a2.name).localeCompare(String(b2.name), 'de'));
+    named.forEach((m) => {
+      const t = thanksCountFor(m.id, idx);
+      const pu = pun[m.id] || { punctual: 0, late: 0 };
+      const ab = absenceFor(m.id, idx);
+      html += '<div style="display:flex;gap:9px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">' +
+        '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' +
+        '<span style="flex:1;min-width:0"><strong style="font-size:14px">' + esc(m.name) + '</strong>' +
+        '<span class="hint" style="display:block">' + (t ? '🤝 ' + plural(t, 'Bestätigung', 'Bestätigungen') : 'noch keine Bestätigung') +
+        ' · pünktlich ' + pu.punctual + (pu.late ? ' · ' + pu.late + ' nachgetragen' : '') + '</span></span>' +
+        (ab ? '<span class="pill">' + esc(ABSENCE_REASON[ab.reason] || 'abwesend') + '</span>' : '') +
+        '</div>';
+    });
+    html += '<p class="hint" style="margin-top:10px">Diese Woche wurden ' + plural(totalThanks, 'Aufgabe', 'Aufgaben') + ' bedankt.</p></div>';
+
+    // ---- Pünktlichkeit über die gesamte Zeit ----
+    const po = punctualityOverall();
+    html += '<div class="card"><div class="card__head"><h3>Pünktlichkeit</h3><span class="card__sub">' + po.pct + ' % pünktlich</span></div>';
+    html += '<div class="bar"><div class="bar__fill" style="width:' + po.pct + '%;background:var(--accent)"></div></div>';
+    html += '<p class="hint" style="margin-top:6px">' + plural(po.punctual, 'Aufgabe', 'Aufgaben') + ' in der fälligen Woche erledigt, ' +
+      plural(po.late, 'Aufgabe', 'Aufgaben') + ' später nachgetragen. Wichtig für jede Belohnung: Punkte steigen auch, wenn jemand fehlt – die Pünktlichkeit zeigt das.</p></div>';
+
     const base = weekIndexOf(new Date());
     const weeks = [];
     for (let o = 7; o >= 0; o--) weeks.push(base - o);
@@ -1319,7 +1605,7 @@
       '<span>Ende-zu-Ende-Verschlüsselung (empfohlen)</span></label>' +
       '<label class="switch"><input type="checkbox" id="sync-on" ' + (sc.enabled ? 'checked' : '') + '><span class="switch__ui"></span>' +
       '<span>Live-Sync aktiv</span></label>' +
-      '<div id="syncstatus" class="syncstatus syncstatus--' + sc.status + '">' +
+      '<div id="syncstatus" class="syncstatus syncstatus--' + sc.status + '" role="status" aria-live="polite">' +
       (sc.status === 'fehler' && sc.error ? esc(sc.error) : (sc.lastSync ? 'Zuletzt synchronisiert: ' + new Date(sc.lastSync).toLocaleString('de-DE') : 'Noch nicht synchronisiert')) +
       '</div>' +
       '<div class="row" style="border:0;gap:8px;margin-top:10px">' +
@@ -1344,7 +1630,7 @@
       if (!isStandalone() && isIOS()) {
         pushHtml += '<div class="notice">Auf iPhone und iPad kommen Benachrichtigungen nur, wenn die App zum Home-Bildschirm hinzugefügt wurde.</div>';
       }
-      pushHtml += '<div id="pushstatus" class="syncstatus syncstatus--' + pc.status + '">' +
+      pushHtml += '<div id="pushstatus" class="syncstatus syncstatus--' + pc.status + '" role="status" aria-live="polite">' +
         (pc.status === 'fehler' && pc.error ? esc(pc.error) :
           (pc.status === 'aktiv' ? 'Benachrichtigungen sind aktiv.' : 'Noch nicht aktiv.')) +
         '</div>';
@@ -1357,9 +1643,40 @@
         '<select class="input" id="push-hour">' +
         PUSH_HOURS.map(function (h) { return '<option value="' + h.v + '"' + (pc.hour === h.v ? ' selected' : '') + '>' + h.t + '</option>'; }).join('') +
         '</select><p class="hint" style="margin-top:6px">Eine Erinnerung am Tag reicht meistens – wer putzt, sieht sie ohnehin im Plan.</p></div>';
+      pushHtml += '<div class="field" style="margin-top:12px"><label>An welchen Tagen</label><div class="daypick">' +
+        PUSH_DAYS.map(function (d) {
+          const on = (pc.days || []).indexOf(d.v) !== -1;
+          return '<button type="button" class="daypick__day' + (on ? ' is-on' : '') + '" data-action="push-day" data-day="' + d.v + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + d.t + '</button>';
+        }).join('') +
+        '</div><p class="hint" style="margin-top:6px">Leere Auswahl = jeden Tag. So lässt sich die Erinnerung z. B. auf Mo–Fr beschränken.</p></div>';
     }
     pushHtml += '</div>';
     html += pushHtml;
+
+    // ---- Abwesenheiten (Urlaub / Krankheit pausieren Punkte) ----
+    html += '<div class="card"><div class="card__head"><h3>Abwesenheiten</h3></div>' +
+      '<p class="hint">Im Urlaub oder krank? Dann zählen die Punkte dieser Zeit nicht – sonst sieht die Fairness falsch aus und jede Belohnung wäre verzerrt.</p>' +
+      '<div class="field"><label>Wer</label><select class="input" id="abs-member">' +
+      state.members.map((m) => '<option value="' + m.id + '">' + esc(m.emoji + ' ' + m.name) + '</option>').join('') +
+      '</select></div>' +
+      '<div class="row" style="gap:8px;border:0;padding:0">' +
+      '<div class="field" style="flex:1;margin:0"><label>Von</label><input class="input" type="date" id="abs-from"></div>' +
+      '<div class="field" style="flex:1;margin:0"><label>Bis</label><input class="input" type="date" id="abs-to"></div></div>' +
+      '<div class="field" style="margin-top:10px"><label>Grund</label><select class="input" id="abs-reason">' +
+      Object.keys(ABSENCE_REASON).map((k) => '<option value="' + k + '">' + ABSENCE_REASON[k] + '</option>').join('') +
+      '</select></div>' +
+      '<button class="btn btn--primary btn--block" data-action="abs-add">Abwesenheit eintragen</button>';
+    if (state.absences.length) {
+      html += '<div style="margin-top:12px">';
+      state.absences.slice().sort((a2, b2) => String(a2.from).localeCompare(String(b2.from))).forEach((ab) => {
+        const m = member(ab.memberId);
+        html += '<div class="row" style="padding:8px 0"><div class="row__main"><strong>' + (m ? esc(m.emoji + ' ' + m.name) : 'Unbekannt') +
+          '</strong><span>' + fmtDay(ab.from) + ' – ' + fmtDay(ab.to) + ' · ' + esc(ABSENCE_REASON[ab.reason] || 'abwesend') + '</span></div>' +
+          '<button class="btn btn--sm btn--danger" data-action="abs-del" data-id="' + esc(ab.id) + '" aria-label="Abwesenheit löschen">✕</button></div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
 
     html += '<div class="card"><div class="card__head"><h3>Daten teilen & sichern</h3></div>' +
       '<p class="hint">Ohne Konto: Der Stand liegt auf jedem Gerät. Mit einem Code bringst du ihn zu den anderen – oder per Datei auf den Rechner.</p>' +
@@ -1368,7 +1685,14 @@
       '<button class="btn" data-action="import-open">Code einfügen</button></div></div>' +
       '<div class="row" style="border:0"><div class="row__actions" style="flex:1;flex-wrap:wrap">' +
       '<button class="btn" data-action="export-file">Als Datei sichern</button>' +
-      '<button class="btn" data-action="import-file">Datei einlesen</button></div></div></div>';
+      '<button class="btn" data-action="import-file">Datei einlesen</button></div></div>' +
+      '<div class="row" style="border:0;margin-top:8px"><div class="row__actions" style="flex:1;flex-wrap:wrap">' +
+      '<button class="btn" data-action="share-link">Einladungs-Link (QR)</button>' +
+      '<button class="btn" data-action="backup-key">WG-Schlüssel sichern</button></div></div>' +
+      '<div class="row" style="border:0;margin-top:8px"><div class="row__actions" style="flex:1;flex-wrap:wrap">' +
+      '<button class="btn" data-action="persist" id="persistbtn">Speicher dauerhaft behalten</button></div></div>' +
+      '<p class="hint" id="persistinfo" style="margin-top:6px"></p>' +
+      '<div id="sharebox"></div></div>';
 
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     html += '<div class="card"><div class="card__head"><h3>Als App installieren</h3>' +
@@ -1378,6 +1702,13 @@
     }
     html += '<p class="hint"><strong>iPhone / iPad:</strong> Safari öffnen → Teilen-Symbol → „Zum Home-Bildschirm“.<br><br>' +
       '<strong>Android:</strong> Chrome öffnen → Drei-Punkte-Menü → „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.</p></div>';
+
+    html += '<div class="card"><div class="card__head"><h3>Rechtliches</h3></div>' +
+      '<div class="row"><div class="row__main"><strong>Impressum</strong><span>Anbieterkennzeichnung</span></div>' +
+      '<a class="btn btn--sm" href="impressum.html">Öffnen</a></div>' +
+      '<div class="row"><div class="row__main"><strong>Datenschutz</strong><span>Welche Daten wo liegen</span></div>' +
+      '<a class="btn btn--sm" href="datenschutz.html">Öffnen</a></div>' +
+      '<p class="hint" style="margin-top:8px">Die App speichert deine Daten nur auf deinem Gerät. Ohne Live-Sync geht nichts ins Internet.</p></div>';
 
     html += '<div class="card"><div class="card__head"><h3>Info</h3></div>' +
       '<div class="row"><div class="row__main"><strong>WG-Putzplan</strong><span>Version 1.0 · offlinefähig</span></div></div>' +
@@ -1680,6 +2011,37 @@
         out.weeks[wk].notes = Object.assign({}, out.weeks[wk].notes || {}, src.notes);
       }
     });
+    // Bestätigungen („Danke") vereinen: die Menge der bestätigenden Personen.
+    if (incoming.thanks && typeof incoming.thanks === 'object') {
+      out.thanks = out.thanks && typeof out.thanks === 'object' ? out.thanks : {};
+      Object.keys(incoming.thanks).forEach(wk => {
+        const src = incoming.thanks[wk];
+        if (!src || typeof src !== 'object') return;
+        if (!out.thanks[wk]) out.thanks[wk] = {};
+        Object.keys(src).forEach(roomId => {
+          if (!out.thanks[wk][roomId]) out.thanks[wk][roomId] = {};
+          Object.keys(src[roomId]).forEach(taskId => {
+            const a2 = out.thanks[wk][roomId][taskId] || [];
+            const b2 = Array.isArray(src[roomId][taskId]) ? src[roomId][taskId] : [];
+            const merged = a2.slice();
+            b2.forEach((m) => { if (merged.indexOf(m) === -1) merged.push(m); });
+            out.thanks[wk][roomId][taskId] = merged;
+          });
+        });
+      });
+    }
+    // Abwesenheiten vereinen (gleiche Kennung: der neuere Eintrag gewinnt).
+    if (Array.isArray(incoming.absences)) {
+      out.absences = Array.isArray(out.absences) ? out.absences : [];
+      incoming.absences.forEach(ab => {
+        if (!ab || !ab.id) return;
+        const ex = out.absences.find(x => x.id === ab.id);
+        if (!ex) { out.absences.push(ab); return; }
+        if ((ab.updatedAt || 0) >= (ex.updatedAt || 0)) {
+          ex.memberId = ab.memberId; ex.from = ab.from; ex.to = ab.to; ex.reason = ab.reason;
+        }
+      });
+    }
     // Gemeinsame Einstellungen des Plans: der neuere Stand gewinnt.
     // Ohne das wuerden zwei Geraete bei unterschiedlichen Werten (WG-Name,
     // Reihenfolge, Versatz) endlos denselben Stand hin- und herschieben.
@@ -1749,7 +2111,7 @@
   /* =========================================================
      Event-Handling
      ========================================================= */
-  document.addEventListener('click', function (ev) {
+  document.addEventListener('click', async function (ev) {
     const tab = ev.target.closest('.tab');
     if (tab) {
       ui.view = tab.dataset.view;
@@ -1767,6 +2129,83 @@
       case 'next-week': ui.weekOffset++; render(); break;
       case 'this-week': ui.weekOffset = 0; render(); break;
       case 'task': toggleTask(roomId, taskId); break;
+      case 'task-thanks': {
+        const tIdx = currentIndex();
+        const ent = doneEntry(roomId, taskId, tIdx);
+        if (!ent || !ent.by) { toast('Diese Aufgabe ist noch nicht erledigt'); break; }
+        if (ent.by === state.currentUser) { toast('Eigene Aufgaben lassen sich nicht bedanken'); break; }
+        toggleThanks(roomId, taskId, tIdx, state.currentUser);
+        render();
+        break;
+      }
+      case 'abs-add': {
+        const sel = $('#abs-member'), from = $('#abs-from'), to = $('#abs-to'), why = $('#abs-reason');
+        if (!sel || !from || !to) break;
+        if (!from.value || !to.value) { toast('Bitte Von- und Bis-Datum wählen'); break; }
+        if (to.value < from.value) { toast('Das Bis-Datum muss nach dem Von-Datum liegen'); break; }
+        state.absences.push({ id: uid('ab'), memberId: sel.value, from: from.value, to: to.value, reason: (why && why.value) || 'sonstiges', updatedAt: Date.now() });
+        save(); render();
+        toast('Abwesenheit eingetragen – Punkte pausieren in dieser Zeit');
+        break;
+      }
+      case 'abs-del': {
+        const aid = el.dataset.id;
+        state.absences = state.absences.filter((x) => x.id !== aid);
+        save(); render();
+        break;
+      }
+      case 'push-day': {
+        const day = parseInt(el.dataset.day, 10);
+        if (isNaN(day)) break;
+        const dpc = pushCfg();
+        const i = dpc.days.indexOf(day);
+        if (i >= 0) dpc.days.splice(i, 1); else dpc.days.push(day);
+        dpc.days.sort();
+        save();
+        pushRegister().catch(function () {});
+        render();
+        break;
+      }
+      case 'share-link': shareLink(); break;
+      case 'backup-key': backupKey(); break;
+      case 'persist': persistStorage(); break;
+      case 'goto-print': ui.view = 'print'; render(); window.scrollTo(0, 0); break;
+      case 'goto-week': ui.view = 'week'; render(); window.scrollTo(0, 0); break;
+      case 'copy-share': {
+        const box = $('#sharebox');
+        const link = box ? box.dataset.link : '';
+        if (!link) break;
+        try {
+          await navigator.clipboard.writeText(link);
+          toast('Link kopiert ✓');
+        } catch (e) {
+          toast('Kopieren nicht möglich – bitte den Text von Hand markieren');
+        }
+        break;
+      }
+      case 'native-share': {
+        const box = $('#sharebox');
+        const link = box ? box.dataset.link : '';
+        if (!link) break;
+        try {
+          if (navigator.share) await navigator.share({ title: 'WG-Putzplan', text: 'Unser Putzplan – bitte speichern:', url: link });
+          else { await navigator.clipboard.writeText(link); toast('Link kopiert ✓'); }
+        } catch (e) { /* abgebrochen */ }
+        break;
+      }
+      case 'accept-invite': {
+        const k = el.dataset.key;
+        closeSheet();
+        if (!k) break;
+        const sc2 = syncCfg();
+        sc2.key = k;
+        sc2.enabled = true;
+        save(); render();
+        toast('Schlüssel übernommen – der Plan wird geladen');
+        syncCycle(false, true);
+        break;
+      }
+      case 'print-now': window.print(); break;
       case 'room-all': {
         const idx = currentIndex();
         const r = room(roomId);
@@ -2336,6 +2775,23 @@
     }).catch(() => { /* stiller Fehler */ });
   }
 
+  // Einladungs-Link der Form ...#wg=SCHLUESSEL
+  function applyInviteLink() {
+    const h = location.hash || '';
+    const m = /[#&]wg=([^&]+)/.exec(h);
+    if (!m) return;
+    let key = '';
+    try { key = decodeURIComponent(m[1]); } catch (e) { key = m[1]; }
+    if (!key) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    openSheet('Einladung annehmen?',
+      '<div class="notice">Jemand hat dir den Zugang zum Putzplan deiner WG geschickt.</div>' +
+      '<p class="hint" style="margin-top:10px">Wenn du annimmst, siehst du den Plan deiner WG automatisch. ' +
+      'Der Schlüssel steht nur in diesem Link – er wird nicht an den Server geschickt.</p>',
+      '<button class="btn" data-action="close-sheet">Abbrechen</button>' +
+      '<button class="btn btn--primary" data-action="accept-invite" data-key="' + esc(key) + '">Annehmen</button>');
+  }
+
   /* ---------- Theme des Systems ---------- */
   if (window.matchMedia) {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -2391,15 +2847,58 @@
   /* ---------- Start ---------- */
   render();
   applyHashCode();
+  applyInviteLink();
   // Live-Sync: beim Start einmal abholen, danach regelmäßig
   if (syncReady()) { setTimeout(() => syncCycle(false), 800); }
   setTimeout(pushStartup, 900);
-  setInterval(() => {
-    if (syncReady() && document.visibilityState === 'visible') syncCycle(false);
-  }, 30000);
+
+  /* ---------- Adaptives Abfragen ----------
+     Statt alle 30 Sekunden zu pollen, wird das Intervall länger, solange sich
+     nichts ändert. Bei einer Änderung, beim Öffnen der App oder bei einer
+     Push-Nachricht geht es sofort wieder los. Im Hintergrund pausiert das
+     Abfragen ganz – das spart Akku. */
+  const POLL_STEPS = [30000, 60000, 120000, 300000];
+  let pollTimer = null;
+  let pollDelay = POLL_STEPS[0];
+  function schedulePoll(delay) {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (!syncReady()) return;
+    pollTimer = setTimeout(runPoll, delay || pollDelay);
+  }
+  function runPoll() {
+    pollTimer = null;
+    if (!syncReady()) return;
+    if (document.visibilityState !== 'visible') { schedulePoll(pollDelay); return; }
+    const before = state.updatedAt;
+    Promise.resolve(syncCycle(false)).then(function () {
+      if (state.updatedAt !== before) pollDelay = POLL_STEPS[0];   // es gab Änderungen -> häufiger prüfen
+      else pollDelay = POLL_STEPS[Math.min(POLL_STEPS.length - 1, POLL_STEPS.indexOf(pollDelay) + 1)];
+      schedulePoll(pollDelay);
+    });
+  }
+  function resetPoll() {
+    pollDelay = POLL_STEPS[0];
+    schedulePoll(pollDelay);
+  }
+  if (syncReady()) schedulePoll();
   document.addEventListener('visibilitychange', function () {
-    if (syncReady() && document.visibilityState === 'visible') syncCycle(false);
+    if (document.visibilityState === 'visible') {
+      if (syncReady()) { resetPoll(); syncCycle(false); }
+    } else if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
   });
+  // Bei jeder lokalen Aenderung den Abruf neu starten (30 Sekunden).
+  const origSave = save;
+  save = function (keepTime) {
+    origSave(keepTime);
+    if (syncReady()) resetPoll();
+  };
+
+  // Wird ein Einladungs-Link in eine bereits offene App eingefuegt,
+  // muss die App darauf reagieren (kein Neuladen noetig).
+  window.addEventListener('hashchange', function () { applyInviteLink(); });
 
   window.addEventListener('storage', function (ev) {
     if (ev.key === STORAGE_KEY) { state = load(); render(); }

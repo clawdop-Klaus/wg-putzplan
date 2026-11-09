@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Datenschutz – WG-Putzplan</title>
+<meta name="description" content="Datenschutzerklärung des WG-Putzplans: welche Daten wo liegen und warum.">
+<meta name="theme-color" content="#4f6df5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c101c" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="./icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="stylesheet" href="./styles.css">
+<style>
+  .legal{max-width:720px;margin:0 auto;padding:22px 16px 60px}
+  .legal h1{font-size:21px;margin:6px 0 4px}
+  .legal h2{font-size:16px;margin:22px 0 6px}
+  .legal p,.legal li{font-size:14px;line-height:1.65;color:var(--text)}
+  .legal ul{padding-left:20px}
+  .legal .back{margin-top:26px}
+  .legal .todo{
+    border:1px dashed var(--danger);background:#fff4f6;color:var(--danger);
+    border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.55;margin:14px 0;
+  }
+  html[data-theme="dark"] .legal .todo{background:#3a1522}
+  .legal table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .legal td{padding:7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  .legal td:first-child{width:38%;color:var(--muted);padding-right:10px}
+  .legal .ok{color:var(--ok);font-weight:700}
+</style>
+</head>
+<body>
+<div class="legal">
+  <a class="btn btn--sm" href="./">← Zurück zur App</a>
+  <h1>Datenschutzerklärung</h1>
+  <p>Kurz gesagt: Der Putzplan bleibt auf deinem Gerät. Nur wer den Live-Sync
+  bewusst einschaltet, teilt Daten mit der WG – und selbst dann sieht der Server
+  nur Chiffretext.</p>
+
+  <div class="todo">
+    <strong>Noch zu prüfen:</strong> Die mit ⟨…⟩ markierten Angaben (Verantwortlicher,
+    Kontakt) müssen vor der Veröffentlichung ersetzt werden. Die inhaltlichen Aussagen
+    beschreiben den tatsächlichen Stand des Codes.
+  </div>
+
+  <h2>1. Verantwortlicher</h2>
+  <p>⟨Vor- und Nachname bzw. Firma⟩, ⟨Anschrift⟩, ⟨E-Mail-Adresse⟩.</p>
+
+  <h2>2. Grundsatz: Daten bleiben lokal</h2>
+  <p>Die App ist eine PWA, die vollständig im Browser läuft. Putzplan, Mitglieder,
+  Aufgaben, Punkte, Bestätigungen („Fleißwoche“) und Abwesenheiten werden im
+  <em>localStorage</em> deines Geräts gespeichert – also nur auf deinem Smartphone,
+  Tablet oder Rechner. Sie werden nicht übertragen, solange du den Live-Sync nicht
+  aktivierst.</p>
+
+  <h2>3. Was beim Live-Sync auf dem Server liegt</h2>
+  <p>Aktivierst du den Live-Sync, werden folgende Daten auf einem Server gespeichert
+  (Anbieter: Cloudflare Inc., R2-Speicher, Vereinigte Staaten):</p>
+  <table>
+    <tr><td>Plan</td><td>Verschlüsselt (AES-GCM 256, Schlüssel aus dem WG-Schlüssel abgeleitet). Der Server sieht nur Chiffretext.</td></tr>
+    <tr><td>Inhaltskennung</td><td>HMAC des Planinhalts – nur um zu erkennen, ob sich etwas geändert hat. Kein Rückschluss auf den Inhalt.</td></tr>
+    <tr><td>Gerätekennung</td><td>Zufällige Kennung pro Gerät, damit eine Änderung nicht an das auslösende Gerät zurückgeschickt wird.</td></tr>
+    <tr><td>Push-Abo</td><td>Endpunkt des Browsers, Schlüssel, Erinnerungsstunde, Zeitzone, Wochentage.</td></tr>
+    <tr><td>WG-Schlüssel</td><td>Verlässt das Gerät <strong>nie</strong>. Der Server speichert nur dessen Hash (SHA-256) als Zugangsschlüssel.</td></tr>
+  </table>
+  <p class="ok">Nicht gespeichert werden: Namen, Inhalte von Notizen, Aufgabentexte,
+  Punkte, Bestätigungen oder Abwesenheiten – sie stecken ausschließlich im
+  Chiffretext.</p>
+
+  <h2>4. Push-Benachrichtigungen</h2>
+  <p>Erinnerungen werden über Web Push verschickt. Der Nachrichtentext ist bewusst
+  allgemein gehalten („Der Putzplan wurde geändert“) und enthält keine Aufgaben,
+  Namen oder Zeiten. Die tägliche Erinnerung nennt nur den Termin. Am Ende der
+  Zustellung landet ein technischer Eintrag beim Push-Dienst des Herstellers
+  (Google, Mozilla, Apple oder Microsoft) – wie bei jeder App mit Benachrichtigungen.</p>
+
+  <h2>5. Hosting der App</h2>
+  <p>Die App selbst wird über GitHub Pages (GitHub Inc., USA) ausgeliefert. Beim
+  Aufruf lädt dein Browser von dort Dateien und das Service Worker-Skript. Dabei
+  verarbeitet dein Browser die üblichen technischen Verbindungsdaten (IP-Adresse,
+  Zeitpunkt, aufgerufene Datei). Es werden keine Cookies gesetzt und keine
+  Analyse- oder Trackingdienste eingebunden.</p>
+
+  <h2>6. Keine Cookies, kein Tracking, keine Werbung</h2>
+  <p>Die App setzt keine Cookies, bindet keine Werbung ein und analysiert dein
+  Verhalten. Es gibt weder ein Benutzerkonto noch ein Bezahlmodell. Die Werbeeinblendung
+  des Cloudflare-Free-Tiers wird nicht verwendet.</p>
+
+  <h2>7. Aufbewahrung auf dem Server</h2>
+  <p>Der Server löscht verwaiste Push-Abonnements, zu denen es keinen Plan mehr gibt,
+  sowie Abos von Plänen, die seit mehr als 120 Tagen nicht benutzt wurden. Der
+  verschlüsselte Plan selbst wird nicht automatisch gelöscht, damit keine WG
+  versehentlich ihre Daten verliert.</p>
+
+  <h2>8. Deine Rechte</h2>
+  <ul>
+    <li>Auskunft über die verarbeiteten Daten (Art. 15 DSGVO)</li>
+    <li>Berichtigung (Art. 16 DSGVO)</li>
+    <li>Löschung (Art. 17 DSGVO)</li>
+    <li>Einschränkung der Verarbeitung (Art. 18 DSGVO)</li>
+    <li>Datenübertragbarkeit (Art. 20 DSGVO)</li>
+    <li>Widerspruch (Art. 21 DSGVO)</li>
+  </ul>
+  <p>Für die Daten auf deinem Gerät genügt es, die App zu löschen (in den
+  Browser-Einstellungen „Website-Daten löschen“) oder in der App „Alles
+  zurücksetzen“ zu wählen. Für den WG-Plan auf dem Server genügt es, in der App
+  einen <strong>neuen WG-Schlüssel</strong> zu erzeugen – der alte Plan ist dann
+  nicht mehr erreichbar. Ansprüche kannst du unter ⟨E-Mail-Adresse⟩ geltend machen.</p>
+
+  <h2>9. SSL-/TLS-Verschlüsselung</h2>
+  <p>Die Verbindung zwischen App und Server läuft über HTTPS. Zusätzlich ist der
+  Planinhalt Ende-zu-Ende verschlüsselt – auch der Betreiber des Servers kann ihn
+  nicht lesen.</p>
+
+  <p class="back"><a class="btn btn--sm" href="./">← Zurück zur App</a></p>
+</div>
+</body>
+</html>

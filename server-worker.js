@@ -150,6 +150,11 @@ const PUSH_HOST_SUFFIXES = [
   'push.apple.com',             // Safari / iOS
   'notify.windows.com'          // Edge / Windows
 ];
+// Wochentag (0 = Sonntag) eines Zeitpunkts in der Zeitzone des Geraets.
+function localWeekday(utcMs, tzHours) {
+  const d = new Date(utcMs + (tzHours || 0) * 3600000);
+  return d.getUTCDay();
+}
 function allowedPushEndpoint(url) {
   try {
     const u = new URL(url);
@@ -223,6 +228,39 @@ async function loadSubs(env, token) {
 }
 async function saveSubs(env, token, subs) {
   await env.PLANS.put(pushPlanKey(token), JSON.stringify({ subs: subs, updatedAt: Date.now() }));
+}
+// Aufraeumen: Abo-Listen, zu denen es keinen (aktiven) Plan mehr gibt.
+// Der Plan selbst wird NICHT geloescht - so verliert keine WG ihre Daten.
+async function cleanupPushObjects(env, maxAgeDays) {
+  const maxAge = (maxAgeDays || 120) * 86400000;
+  let cursor = null, removed = 0, checked = 0;
+  do {
+    const res = await env.PLANS.list(cursor
+      ? { prefix: PUSH_PREFIX, limit: 1000, cursor: cursor }
+      : { prefix: PUSH_PREFIX, limit: 1000 });
+    for (let i = 0; i < res.objects.length; i++) {
+      const key = res.objects[i].key;
+      if (key.length !== PUSH_PREFIX.length + 64) continue;   // nur Objekte im neuen Format
+      checked++;
+      const token = key.slice(PUSH_PREFIX.length);
+      let drop = false;
+      try {
+        const plan = await env.PLANS.get('plan-' + token);
+        if (!plan) {
+          drop = true;                       // verwaist: es gibt keinen Plan dazu
+        } else {
+          let savedAt = 0;
+          try { const j = JSON.parse(await plan.text()); savedAt = j.savedAt || 0; } catch (e) { savedAt = 0; }
+          if (savedAt && (Date.now() - savedAt) > maxAge) drop = true;  // laenger nicht benutzt
+        }
+      } catch (e) { drop = false; }
+      if (drop) {
+        try { await env.PLANS.delete(key); removed++; } catch (e) { /* egal */ }
+      }
+    }
+    cursor = res.truncated ? res.cursor : null;
+  } while (cursor);
+  return { checked: checked, removed: removed };
 }
 async function notifyPlan(env, token, excludeDevice, payloadObj) {
   const subs = await loadSubs(env, token);
@@ -335,7 +373,10 @@ export default {
           if (!allowedPushEndpoint(body.endpoint)) {
             return json({ error: 'endpoint not allowed' }, 400);
           }
-          if (b64uToBytes(body.keys.p256dh).length !== 65 || b64uToBytes(body.keys.auth).length !== 16) {
+          // p256dh: unkomprimierter P-256-Punkt = 65 Byte.
+          // auth: je nach Browser 16 Byte (Standard) oder 8 Byte (aeltere Entwuerfe).
+          const authLen = b64uToBytes(body.keys.auth).length;
+          if (b64uToBytes(body.keys.p256dh).length !== 65 || authLen < 8 || authLen > 32) {
             return json({ error: 'invalid keys' }, 400);
           }
           const id = await subIdOf(body.endpoint);
@@ -346,6 +387,8 @@ export default {
             dev: body.dev || '',
             hour: typeof body.hour === 'number' ? body.hour : -1,
             tz: typeof body.tz === 'number' ? body.tz : 0,
+            // Wochentage (0 = Sonntag ... 6 = Samstag). Leer = jeden Tag.
+            days: Array.isArray(body.days) ? body.days.filter(function (d) { return typeof d === 'number' && d >= 0 && d <= 6; }) : [],
             createdAt: Date.now()
           };
           const subs = await loadSubs(env, token);
@@ -384,7 +427,7 @@ export default {
         if (path === '/push/list' && request.method === 'GET') {
           const subs = await loadSubs(env, token);
           const detail = subs.map(function (s) {
-            return { id: s.id, dev: s.dev, hour: s.hour, tz: s.tz, endpoint: s.endpoint };
+            return { id: s.id, dev: s.dev, hour: s.hour, tz: s.tz, days: s.days || [], endpoint: s.endpoint };
           });
           return json({ ok: true, count: subs.length, subs: detail });
         }
@@ -430,6 +473,8 @@ export default {
           if (typeof s.hour !== 'number' || s.hour < 0) continue;
           const local = ((utcHour + (s.tz || 0)) % 24 + 24) % 24;
           if (local !== s.hour) continue;
+          // Nur an den gewaehlten Wochentagen erinnern (leer = jeder Tag).
+          if (Array.isArray(s.days) && s.days.length && s.days.indexOf(localWeekday(Date.now(), s.tz)) === -1) continue;
           try {
             await sendPush(env, s, MSG.remind);
           } catch (e) { /* ein Fehler darf die anderen Geräte nicht stoppen */ }
@@ -437,6 +482,10 @@ export default {
       }
       cursor = res.truncated ? res.cursor : null;
       } while (cursor);
+      // Einmal taeglich (3 Uhr UTC) verwaiste Abo-Listen entfernen.
+      if (utcHour === 3) {
+        try { await cleanupPushObjects(env); } catch (e) { /* egal */ }
+      }
     })();
     if (ctx && ctx.waitUntil) ctx.waitUntil(work);
     return work;
@@ -444,4 +493,4 @@ export default {
 };
 
 /* Für den lokalen Test (Byte-Vergleich gegen http_ece) exportiert. */
-export { encryptPush, vapidJwt, b64u, b64uToBytes, pushHeaders };
+export { encryptPush, vapidJwt, b64u, b64uToBytes, pushHeaders, localWeekday, cleanupPushObjects };

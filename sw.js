@@ -1,11 +1,14 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v9';
+const CACHE = 'wg-putzplan-v10';
 const PUSH_CACHE = 'wg-putzplan-push';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './qr.js',
+  './impressum.html',
+  './datenschutz.html',
   './manifest.webmanifest',
   './icons/favicon.svg',
   './icons/icon-192.png',

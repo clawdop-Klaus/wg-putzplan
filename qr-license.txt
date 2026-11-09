@@ -1,0 +1,5 @@
+qr.js – QR Code Generator for JavaScript
+Copyright (c) 2009 Kazuhiko Arase (http://www.d-project.com/)
+Lizenz: MIT (http://www.opensource.org/licenses/mit-license.php)
+Im WG-Putzplan lokal eingebunden – der QR-Code wird vollständig im Browser
+erzeugt, der WG-Schlüssel verlässt das Gerät nicht.
