@@ -1,5 +1,6 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v8';
+const CACHE = 'wg-putzplan-v9';
+const PUSH_CACHE = 'wg-putzplan-push';
 const ASSETS = [
   './',
   './index.html',
@@ -25,13 +26,35 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== PUSH_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
+/* ---------- Zugangsdaten fuer die Abo-Neu-Anmeldung ---------- */
+function credUrl() {
+  try { return new URL('./push-cred', self.location.href).href; } catch (e) { return ''; }
+}
+async function savePushCred(cred) {
+  try {
+    const cache = await caches.open(PUSH_CACHE);
+    await cache.put(new Request(credUrl()), new Response(JSON.stringify(cred), {
+      headers: { 'Content-Type': 'application/json' }
+    }));
+  } catch (e) { /* egal */ }
+}
+async function readPushCred() {
+  try {
+    const cache = await caches.open(PUSH_CACHE);
+    const res = await cache.match(new Request(credUrl()));
+    if (!res) return null;
+    return await res.json();
+  } catch (e) { return null; }
+}
+
 self.addEventListener('message', (e) => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data && e.data.type === 'WG-PUSH-CRED' && e.data.cred) savePushCred(e.data.cred);
 });
 
 /* ---------- Push-Nachrichten (Erinnerungen) ---------- */
@@ -83,13 +106,28 @@ self.addEventListener('notificationclick', (e) => {
   })());
 });
 
-// Wird das Abo vom Browser verworfen, wird es neu registriert.
+// Der Browser hat das Abo erneuert (z. B. nach einer Schluesselrotation).
+// Dann muss es beim Server neu angemeldet werden - sonst kommen keine
+// Nachrichten mehr an, ohne dass man es merkt.
 self.addEventListener('pushsubscriptionchange', (e) => {
   e.waitUntil((async () => {
     try {
-      const reg = await self.registration.pushManager.getSubscription();
-      if (!reg) return;
-      await fetch(pushScopeUrl() + '?push-resubscribe=1', { method: 'GET' }).catch(() => {});
+      const sub = await self.registration.pushManager.getSubscription();
+      const cred = await readPushCred();
+      if (sub && cred && cred.url && cred.auth) {
+        const j = sub.toJSON();
+        await fetch(cred.url + '/push/sub', {
+          method: 'POST',
+          headers: { Authorization: cred.auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint: j.endpoint, keys: j.keys,
+            dev: cred.dev, hour: cred.hour, tz: cred.tz
+          })
+        });
+      }
+      // Offene Seiten Bescheid geben, damit sie den Zustand aktualisieren.
+      const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+      list.forEach((c) => { try { c.postMessage({ type: 'WG-PUSH-RESUBSCRIBED' }); } catch (e) { /* egal */ } });
     } catch (err) { /* ignorieren */ }
   })());
 });

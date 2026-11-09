@@ -142,6 +142,26 @@ async function encryptPush(subscription, plaintext, opts) {
 }
 
 /* ---------- Push senden ---------- */
+// Nur Endpunkte der bekannten Push-Dienste zulassen. Sonst koennte ein
+// WG-Mitglied ueber den Worker beliebige Adressen abrufen lassen (SSRF).
+const PUSH_HOST_SUFFIXES = [
+  'fcm.googleapis.com',         // Chrome / Android / FCM
+  'push.services.mozilla.com',  // Firefox
+  'push.apple.com',             // Safari / iOS
+  'notify.windows.com'          // Edge / Windows
+];
+function allowedPushEndpoint(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    for (const suffix of PUSH_HOST_SUFFIXES) {
+      if (host === suffix || host.endsWith('.' + suffix)) return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
 function pushHeaders(endpoint, jwt) {
   const host = (new URL(endpoint)).host;
   const h = {
@@ -206,20 +226,22 @@ async function saveSubs(env, token, subs) {
 }
 async function notifyPlan(env, token, excludeDevice, payloadObj) {
   const subs = await loadSubs(env, token);
-  let sent = 0, removed = 0, failed = 0;
+  const targets = [];
   const keep = [];
   for (let i = 0; i < subs.length; i++) {
     const s = subs[i];
+    // Das Geraet, das die Aenderung ausgeloest hat, bekommt keine Nachricht.
     if (excludeDevice && s.dev && s.dev === excludeDevice) { keep.push(s); continue; }
-    try {
-      await sendPush(env, s, payloadObj);
-      sent++;
-      keep.push(s);
-    } catch (e) {
-      failed++;
-      if (!e || !e.gone) keep.push(s);   // nur unbrauchbare Abos werden entfernt
-      else removed++;
-    }
+    targets.push(s);
+  }
+  // Parallel zustellen: bei mehreren Geraeten sonst zu langsam.
+  const settled = await Promise.allSettled(targets.map((s) => sendPush(env, s, payloadObj)));
+  let sent = 0, removed = 0, failed = 0;
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i];
+    if (r.status === 'fulfilled') { sent++; keep.push(targets[i]); }
+    else if (r.reason && r.reason.gone) { removed++; }   // unbrauchbares Abo: entfernen
+    else { failed++; keep.push(targets[i]); }
   }
   if (removed) { try { await saveSubs(env, token, keep); } catch (x) { /* egal */ } }
   return { sent: sent, failed: failed, removed: removed, total: subs.length };
@@ -310,6 +332,12 @@ export default {
           if (!body || !body.endpoint || !body.keys || !body.keys.p256dh || !body.keys.auth) {
             return json({ error: 'bad request' }, 400);
           }
+          if (!allowedPushEndpoint(body.endpoint)) {
+            return json({ error: 'endpoint not allowed' }, 400);
+          }
+          if (b64uToBytes(body.keys.p256dh).length !== 65 || b64uToBytes(body.keys.auth).length !== 16) {
+            return json({ error: 'invalid keys' }, 400);
+          }
           const id = await subIdOf(body.endpoint);
           const rec = {
             id: id,
@@ -381,7 +409,11 @@ export default {
   async scheduled(event, env, ctx) {
     const work = (async function () {
       const utcHour = new Date().getUTCHours();
-      const res = await env.PLANS.list({ prefix: PUSH_PREFIX, limit: 1000 });
+      let cursor = null;
+      do {
+      const res = await env.PLANS.list(cursor
+        ? { prefix: PUSH_PREFIX, limit: 1000, cursor: cursor }
+        : { prefix: PUSH_PREFIX, limit: 1000 });
       for (let i = 0; i < res.objects.length; i++) {
         const key = res.objects[i].key;
         // Nur Objekte im neuen Format (push-<64 Zeichen>) sind Abo-Listen
@@ -403,6 +435,8 @@ export default {
           } catch (e) { /* ein Fehler darf die anderen Geräte nicht stoppen */ }
         }
       }
+      cursor = res.truncated ? res.cursor : null;
+      } while (cursor);
     })();
     if (ctx && ctx.waitUntil) ctx.waitUntil(work);
     return work;

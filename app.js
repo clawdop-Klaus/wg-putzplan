@@ -693,6 +693,7 @@
       if (!keyRes.ok) throw new Error('Der Server unterstützt kein Push (Status ' + keyRes.status + ')');
       const pub = await keyRes.json();
       const appServerKey = urlB64ToBytes(pub.publicKey);
+      pc.vapid = pub.publicKey;   // merken: bei Wechsel sind alte Abos wertlos
       let sub = await reg.pushManager.getSubscription();
       if (sub) {
         const cur = sub.options && sub.options.applicationServerKey;
@@ -708,6 +709,7 @@
       if (!res.ok) throw new Error('Abo konnte nicht gespeichert werden (Status ' + res.status + ')');
       pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv';
       save(); render();
+      pushCredToWorker(reg);
       toast('Benachrichtigungen sind aktiv ✓');
     } catch (e) {
       setPushStatus('fehler', 'Push konnte nicht aktiviert werden: ' + (e && e.message ? e.message : e));
@@ -761,8 +763,32 @@
         headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
       });
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(function (reg) { pushCredToWorker(reg); }).catch(function () {});
+      }
       toast('Erinnerungszeit gespeichert');
     } catch (e) { toast('Konnte nicht gespeichert werden'); }
+  }
+  // Der Service Worker braucht die Zugangsdaten, um ein vom Browser
+  // erneuertes Abo selbst wieder anzumelden - auch wenn die App gerade
+  // nicht offen ist.
+  async function pushCredToWorker(reg) {
+    const c = syncCfg();
+    const pc = pushCfg();
+    const target = reg && reg.active ? reg.active : null;
+    if (!target || !pc.enabled || !c.key) return;
+    try {
+      target.postMessage({
+        type: 'WG-PUSH-CRED',
+        cred: {
+          url: (pc.url || c.url).replace(/\/$/, ''),
+          auth: await pushAuth(),
+          dev: deviceId(),
+          hour: pc.hour,
+          tz: tzHours()
+        }
+      });
+    } catch (e) { /* egal */ }
   }
   // Beim Start pruefen, ob das Abo noch passt (Server, Schluessel, Browser-Berechtigung)
   async function pushStartup() {
@@ -776,6 +802,20 @@
       return;
     }
     if (!pushSupported()) { pc.enabled = false; pc.status = 'aus'; save(); return; }
+    // Hat der Server den Push-Schluessel gewechselt? Dann sind alte Abos wertlos.
+    try {
+      const keyRes = await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/key');
+      if (keyRes.ok) {
+        const pub = await keyRes.json();
+        if (pc.vapid && pub.publicKey && pc.vapid !== pub.publicKey) {
+          pc.enabled = false; pc.status = 'fehler';
+          pc.error = 'Der Server hat den Push-Schlüssel gewechselt – bitte neu aktivieren.';
+          save(); render();
+          return;
+        }
+        if (!pc.vapid) { pc.vapid = pub.publicKey; save(); }
+      }
+    } catch (e) { /* Server nicht erreichbar: Status bleibt unveraendert */ }
     if (pushPermission() !== 'granted') {
       pc.status = 'fehler'; pc.error = 'Benachrichtigungen sind im Browser blockiert.';
       save(); render();
@@ -792,6 +832,7 @@
       }
       pc.status = 'aktiv';
       save();
+      pushCredToWorker(reg);
     } catch (e) { /* egal */ }
   }
 
@@ -2043,29 +2084,6 @@
         syncCfg().key = k;
         save();
         toast('Neuer WG-Schlüssel erzeugt – teile ihn mit der WG');
-        break;
-      }
-      case 'sync-save': {
-        const sc2 = syncCfg();
-        sc2.url = ($('#sync-url') || {}).value || SYNC_DEFAULT_URL;
-        sc2.key = (($('#sync-key') || {}).value || '').trim();
-        sc2.enc = !!(($('#sync-enc') || {}).checked);
-        save();
-        render();
-        toast('Sync-Einstellungen gespeichert');
-        break;
-      }
-      case 'sync-toggle': {
-        const sc2 = syncCfg();
-        sc2.enabled = !!(($('#sync-on') || {}).checked);
-        if (sc2.enabled && !sc2.key) {
-          toast('Bitte zuerst einen WG-Schlüssel eintragen oder erzeugen');
-          sc2.enabled = false;
-          save(); render();
-          break;
-        }
-        save(); render();
-        if (sc2.enabled) { setSyncStatus('arbeitet', 'Verbinde …'); syncCycle(false); }
         break;
       }
       case 'sync-now': {
