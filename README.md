@@ -266,3 +266,14 @@ nur so lange, bis sie abgemeldet werden. Die App sendet
 dabei weder WG-Name noch Mitglieder-Namen im Klartext, wenn die Ende-zu-Ende-Verschlüsselung
 aktiv ist. Der Server kennt nur einen Hash des WG-Schlüssels (als Zugriffstoken) und den
 Chiffretext.
+
+## Bedienhinweise (Stand Runde 4)
+
+- **„Alles erledigt“** hakt nur die Aufgaben ab, die der aktuellen Person
+  gehoeren – feste Zuweisungen an andere werden nicht veraendert.
+- **Filter „Meine Aufgaben“** zeigt auch die Raeume, in denen eine Aufgabe
+  fest der aktuellen Person zugeteilt ist.
+- **App-Badge** zaehlt offene Aufgaben (nicht Tage-Eintraege).
+- **Person loeschen** gibt deren feste Aufgaben in den Turnus zurueck.
+- **Sync-Limit**: 5 MB pro Upload (Wochen mit nur Tagesaufgaben werden sonst
+  beim Zusammenfuehren uebersprungen).

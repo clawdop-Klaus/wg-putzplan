@@ -244,6 +244,18 @@ PUNKTE
     "Bad komplett putzen". Punkte zaehlen fuer die Person, die die Aufgabe
     erledigt hat - bei taeglichen Aufgaben also je abgehaktem Tag.
 
+WAS DAS FUER DIE BEDIENUNG HEISST
+    - "Alles erledigt" in einer Raumkarte hakt nur die Aufgaben ab, die DIR
+      gehoeren. Eine Aufgabe, die fest einer anderen Person zugeteilt ist,
+      bleibt unangetastet.
+    - Der Schalter "Meine Aufgaben" oben in der Wochenansicht zeigt nur das,
+      was wirklich dir gehoert - auch dann, wenn eine Aufgabe dir fest
+      zugeteilt ist, obwohl der Raum sonst jemand anderem gehoert.
+    - Das Symbol auf dem Handy (Badge) zaehlt deine offenen AUFGABEN. Eine
+      taegliche Aufgabe zaehlt dabei einmal, nicht siebenmal.
+    - Wird eine Person aus der WG entfernt, wandern ihre fest zugewiesenen
+      Aufgaben automatisch zurueck in den Turnus.
+
 TIPP
     Schnell anlegen: unten in der Wochenansicht "Schnell Aufgabe anlegen".
     Haeufigkeit und Punkte werden von der zuletzt angelegten Aufgabe
