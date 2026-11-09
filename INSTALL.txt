@@ -239,6 +239,14 @@ WER IST DAFUER ZUSTAENDIG (Feld "Zustandig")
       jede Woche bei ihr, auch wenn der Raumturnus woanders liegt. In der
       Wochenansicht steht "immer <Name>" bei der Aufgabe.
 
+EINEM RAUM EINE FESTE PERSON GEBEN
+    Im Tab "Turnus" -> "Räume" -> auf den Raum tippen (Stift-Symbol).
+    Unter "Zuordnung" auf "Fest" stellen und die Person antippen, die dauerhaft
+    zustaendig sein soll. Der Raum wird dann jede Woche ihr zugeteilt, ohne
+    dass sie im Turnus steht. "Speichern" nicht vergessen - erst dann wird es
+    uebernommen und bleibt auch nach dem Neustart erhalten.
+    Rueckgaengig: wieder auf "Wechselnd" stellen und speichern.
+
 PUNKTE
     1 bis 4 Punkte. Ein Punkt fuer "Geschirr abwaschen", vier Punkte fuer
     "Bad komplett putzen". Punkte zaehlen fuer die Person, die die Aufgabe
