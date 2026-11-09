@@ -76,6 +76,11 @@ async function showPushNotification(data) {
   try {
     await self.registration.showNotification(data.title || 'WG-Putzplan', opts);
   } catch (e) { /* Anzeige nicht moeglich */ }
+  // Offene Apps sofort aktualisieren, statt auf den naechsten Abruf zu warten.
+  try {
+    const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    list.forEach((c) => { try { c.postMessage({ type: 'WG-PLAN-CHANGED' }); } catch (e) { /* egal */ } });
+  } catch (e) { /* egal */ }
 }
 
 self.addEventListener('push', (e) => {

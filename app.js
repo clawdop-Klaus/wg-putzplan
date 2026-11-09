@@ -2323,6 +2323,13 @@
 
   /* ---------- Service Worker ---------- */
   if ('serviceWorker' in navigator) {
+    // Meldungen des Service Workers: Plan hat sich geaendert -> sofort abholen;
+    // Abo wurde erneuert -> Zustand der Erinnerungen neu pruefen.
+    navigator.serviceWorker.addEventListener('message', function (ev) {
+      if (!ev.data) return;
+      if (ev.data.type === 'WG-PLAN-CHANGED') { syncCycle(false, true); }
+      else if (ev.data.type === 'WG-PUSH-RESUBSCRIBED') { pushStartup(); }
+    });
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').then(function (reg) {
         reg.addEventListener('updatefound', function () {
