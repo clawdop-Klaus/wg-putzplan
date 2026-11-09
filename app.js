@@ -1314,7 +1314,14 @@
       return html;
     }
 
-    const shown = onlyMine ? sorted.filter((r) => assigneeFor(r.id, idx) === state.currentUser) : sorted;
+    // Im Filter "Meine Aufgaben" zaehlen auch Raeume, in denen mir eine Aufgabe
+    // fest zugeteilt ist - obwohl der Raum sonst jemand anderem gehoert.
+    const shown = onlyMine
+      ? sorted.filter((r) => {
+        if (assigneeFor(r.id, idx) === state.currentUser) return true;
+        return dueTasks(r, idx).some((t) => assigneeForTask(r.id, t, idx) === state.currentUser);
+      })
+      : sorted;
     if (onlyMine) {
       let myTasks = 0;
       state.rooms.forEach((r) => {
