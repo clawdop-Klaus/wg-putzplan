@@ -2026,6 +2026,24 @@
       '<button class="btn" data-action="close-sheet">Abbrechen</button>');
   }
 
+  /* ---------- Zuordnung: Wechselnd oder fest (mit Person) ---------- */
+  // Wird von beiden Raum-Dialogen benutzt, damit die feste Person auch beim
+  // Anlegen eines Raums gesetzt werden kann.
+  function roomModeFields(r, roomId) {
+    const fixed = !!(r && r.mode === 'fixed');
+    const cur = r ? r.fixedMember : null;
+    let html =
+      '<div class="field"><label>Zuordnung</label><div class="segmented" id="r-mode">' +
+      '<button data-action="pick-mode" data-room="' + (roomId || '') + '" data-mode="rotation" class="' + (!fixed ? 'is-active' : '') + '">Wechselnd</button>' +
+      '<button data-action="pick-mode" data-room="' + (roomId || '') + '" data-mode="fixed" class="' + (fixed ? 'is-active' : '') + '">Fest</button>' +
+      '</div></div>';
+    html += '<div class="field" id="fixedwrap"' + (fixed ? '' : ' style="display:none"') + '><label>Feste Person</label><div id="r-fixed">';
+    html += state.members.map((m) => '<button class="chip' + (cur === m.id ? ' chip--active' : '') + '" data-action="pick-fixed" data-member="' + m.id + '">' +
+      '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('');
+    html += '</div><p class="hint" style="margin-top:6px">Diese Person ist dauerhaft fuer den Raum zustaendig – unabhaengig vom Turnus.</p></div>';
+    return html;
+  }
+
   /* ---------- Raum bearbeiten ---------- */
   function sheetEditRoom(id) {
     const r = room(id);
@@ -2036,21 +2054,7 @@
       '<div class="field"><label>Farbe</label><div id="r-color">' +
       MEMBER_COLORS.map((c) => '<button class="chip' + (c === r.color ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (c === r.color ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Zuordnung</label><div class="segmented" id="r-mode">' +
-      '<button data-action="pick-mode" data-mode="rotation" class="' + (r.mode !== 'fixed' ? 'is-active' : '') + '">Wechselnd</button>' +
-      '<button data-action="pick-mode" data-mode="fixed" class="' + (r.mode === 'fixed' ? 'is-active' : '') + '">Fest</button>' +
-      '</div></div>';
-    if (r.mode === 'fixed') {
-      body += '<div class="field" id="fixedwrap"><label>Feste Person</label><div id="r-fixed">' +
-        state.members.map((m) => '<button class="chip' + (r.fixedMember === m.id ? ' chip--active' : '') + '" data-action="pick-fixed" data-member="' + m.id + '">' +
-          '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('') +
-        '</div></div>';
-    } else {
-      body += '<div class="field" id="fixedwrap" style="display:none"><label>Feste Person</label><div id="r-fixed">' +
-        state.members.map((m) => '<button class="chip" data-action="pick-fixed" data-member="' + m.id + '">' +
-          '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('') +
-        '</div></div>';
-    }
+      roomModeFields(r, r.id);
     body += '<p class="hint">Aufgaben des Raums findest du im Tab „Räume“ – tippe dort auf eine Aufgabe, um sie zu bearbeiten.</p>';
     openSheet('Raum bearbeiten', body,
       '<button class="btn" data-action="save-room" data-room="' + r.id + '">Speichern</button>' +
@@ -2108,7 +2112,8 @@
       '<div class="field"><label>Farbe</label><div id="r-color">' +
       MEMBER_COLORS.map((c, i) => '<button class="chip' + (i === 0 ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (i === 0 ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Erste Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>';
+      '<div class="field"><label>Erste Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>' +
+      roomModeFields({ mode: 'rotation', fixedMember: null }, '');
     openSheet('Neuer Raum', body,
       '<button class="btn" data-action="save-room" data-new="1">Anlegen</button>' +
       '<button class="btn" data-action="close-sheet">Abbrechen</button>');
@@ -2634,15 +2639,23 @@
       case 'edit-room': sheetEditRoom(roomId); break;
       case 'add-room': sheetAddRoom(); break;
       case 'save-room': {
-        const name = ($('#r-name').value || '').trim();
+        // Beim Bearbeiten gibt es kein Feld fuer die erste Aufgabe - deshalb
+        // darf hier nicht blind auf #r-task-title zugegriffen werden.
+        const nameEl = $('#r-name'), iconEl = $('#r-icon'), taskTitleEl = $('#r-task-title');
+        const name = nameEl ? (nameEl.value || '').trim() : '';
         if (!name) { toast('Bitte einen Namen eingeben'); break; }
-        const icon = ($('#r-icon').value || '').trim() || '🧽';
+        const icon = iconEl ? (iconEl.value || '').trim() : '';
         const colorBtn = document.querySelector('#r-color .chip--active');
         const color = colorBtn ? colorBtn.dataset.color : MEMBER_COLORS[0];
         const modeBtn = document.querySelector('#r-mode .is-active');
         const mode = modeBtn && modeBtn.dataset.mode === 'fixed' ? 'fixed' : 'rotation';
         const fixedBtn = document.querySelector('#r-fixed .chip--active');
         const fixedMember = mode === 'fixed' ? (fixedBtn ? fixedBtn.dataset.member : null) : null;
+        if (mode === 'fixed' && !fixedMember) {
+          // Ohne Auswahl darf nicht stillschweigend jemand anderes eingetragen werden.
+          toast('Bitte eine feste Person auswaehlen');
+          break;
+        }
         let r;
         if (el.dataset.new) {
           r = { id: uid('r'), name, icon, color, mode, fixedMember, tasks: [] };
@@ -2652,11 +2665,11 @@
           if (r) {
             r.name = name; r.icon = icon; r.color = color;
             r.mode = mode;
-            r.fixedMember = mode === 'fixed' ? (fixedMember || r.fixedMember || (state.members[0] ? state.members[0].id : null)) : null;
+            r.fixedMember = mode === 'fixed' ? fixedMember : null;
             if (mode === 'fixed' && !r.fixedMember) r.mode = 'rotation';
           }
         }
-        const tTitle = ($('#r-task-title').value || '').trim();
+        const tTitle = taskTitleEl ? (taskTitleEl.value || '').trim() : '';
         if (r && tTitle) {
           r.tasks.push({ id: uid('t'), title: tTitle, freq: 'w', p: 1 });
         }
@@ -2800,14 +2813,32 @@
           el.classList.add('is-active');
           const wrap = document.getElementById('fixedwrap');
           if (wrap) wrap.style.display = el.dataset.mode === 'fixed' ? '' : 'none';
+          // Beim Wechsel auf "Fest" die aktuell zustaendige Person vorwaehlen -
+          // sichtbar markiert, damit niemand unbemerkt die falsche Person bekommt.
+          if (el.dataset.mode === 'fixed') {
+            const fbox = document.getElementById('r-fixed');
+            if (fbox && !fbox.querySelector('.chip--active')) {
+              let want = null;
+              if (el.dataset.room) {
+                const rr = room(el.dataset.room);
+                if (rr) want = rr.fixedMember || assigneeFor(rr.id, currentIndex());
+              }
+              if (!want && state.members.length) want = state.members[0].id;
+              const chip = want ? fbox.querySelector('[data-member="' + want + '"]') : null;
+              if (chip) chip.classList.add('chip--active');
+            }
+          }
         }
         break;
       }
       case 'pick-fixed': {
         const box = document.getElementById('r-fixed');
         if (box) {
+          // Achtung: Chips werden mit "chip--active" markiert (siehe styles.css).
+          // Mit "is-active" waere die Auswahl nicht sichtbar und beim Speichern
+          // wuerde die falsche Person uebernommen.
           box.querySelectorAll('.chip').forEach((c) => c.classList.remove('chip--active'));
-          el.classList.add('is-active');
+          el.classList.add('chip--active');
         }
         break;
       }
