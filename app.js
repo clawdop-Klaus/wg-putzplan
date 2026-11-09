@@ -623,6 +623,12 @@
   function pushPermission() {
     try { return (typeof Notification !== 'undefined') ? Notification.permission : 'denied'; } catch (e) { return 'denied'; }
   }
+  // iPadOS 13+ meldet sich als "Macintosh" - nur mit Touch-Punkten erkennbar.
+  function isIOS() {
+    const ua = navigator.userAgent || '';
+    if (/iPhone|iPad|iPod/i.test(ua)) return true;
+    return /Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1;
+  }
   function isStandalone() {
     return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   }
@@ -701,13 +707,14 @@
       }
       if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
       const j = sub.toJSON();
+      const auth = await pushAuth();
       const res = await fetch(base + '/push/sub', {
         method: 'POST',
-        headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
       });
       if (!res.ok) throw new Error('Abo konnte nicht gespeichert werden (Status ' + res.status + ')');
-      pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv';
+      pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv'; pc.auth = auth;
       save(); render();
       pushCredToWorker(reg);
       toast('Benachrichtigungen sind aktiv ✓');
@@ -830,6 +837,22 @@
         save(); render();
         return;
       }
+      // Ist das Abo noch dem aktuellen WG-Schluessel zugeordnet?
+      // Nach einem neuen Schluessel muss es neu angemeldet werden.
+      try {
+        const auth = await pushAuth();
+        if (pc.auth && pc.auth !== auth) {
+          const j = sub.toJSON();
+          await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
+            method: 'POST',
+            headers: { Authorization: auth, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+          });
+          pc.auth = auth;
+        } else if (!pc.auth) {
+          pc.auth = auth;
+        }
+      } catch (e) { /* egal */ }
       pc.status = 'aktiv';
       save();
       pushCredToWorker(reg);
@@ -1318,7 +1341,7 @@
       if (pushPermission() === 'denied') {
         pushHtml += '<div class="notice" style="background:#ffe4ea">Benachrichtigungen sind im Browser blockiert. Bitte in den Website-Einstellungen erlauben.</div>';
       }
-      if (!isStandalone() && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      if (!isStandalone() && isIOS()) {
         pushHtml += '<div class="notice">Auf iPhone und iPad kommen Benachrichtigungen nur, wenn die App zum Home-Bildschirm hinzugefügt wurde.</div>';
       }
       pushHtml += '<div id="pushstatus" class="syncstatus syncstatus--' + pc.status + '">' +
