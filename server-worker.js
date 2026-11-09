@@ -51,6 +51,9 @@ export default {
       }
 
       if (request.method === 'PUT') {
+        // Groesse schon vor dem Lesen pruefen -> kein unnoetiger Speicher
+        const len = Number(request.headers.get('Content-Length') || 0);
+        if (len > 1000000) return json({ error: 'too large' }, 413);
         const text = await request.text();
         if (text.length > 1000000) return json({ error: 'too large' }, 413);
         let payload;

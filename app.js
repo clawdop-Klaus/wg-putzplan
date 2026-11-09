@@ -482,7 +482,11 @@
     return JSON.parse(new TextDecoder().decode(pt));
   }
   function fingerprint(obj) {
-    const s = JSON.stringify(obj);
+    // updatedAt wird bewusst ignoriert: sonst schieben zwei Geräte denselben Stand
+    // im 30-Sekunden-Takt hin und her, ohne dass sich etwas ändert.
+    const copy = Object.assign({}, obj);
+    delete copy.updatedAt;
+    const s = JSON.stringify(copy);
     let h = 0;
     for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
     return s.length + ':' + h;
