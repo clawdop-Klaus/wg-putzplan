@@ -277,3 +277,6 @@ Chiffretext.
 - **Person loeschen** gibt deren feste Aufgaben in den Turnus zurueck.
 - **Sync-Limit**: 5 MB pro Upload (Wochen mit nur Tagesaufgaben werden sonst
   beim Zusammenfuehren uebersprungen).
+
+- **Feste Person pro Raum**: Im Dialog „Raum bearbeiten“ auf **Fest** stellen und
+  die Person antippen – auch direkt beim Anlegen eines neuen Raums möglich.
