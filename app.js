@@ -224,7 +224,6 @@
   }
   function isDayTask(task) { return ((task && task.freq) || 'w') === 'd'; }
   function taskDue(task, idx) { return dueDays(task, idx).length > 0; }
-  const FREQ_LABEL = { w: 'wöchentlich', '2w': 'alle 2 Wochen', m: 'monatlich' };
   // Index aller Aufgaben (fuer schnelle Punkte-/Statistik-Berechnung).
   // Wird bei jeder Aenderung verworfen.
   function taskIndex() {

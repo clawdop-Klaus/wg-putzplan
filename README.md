@@ -42,6 +42,11 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
   Man kann eine Aufgabe aber auch **fest einer Person** zuordnen – dann erledigt sie
   diese Person jede Woche, unabhängig vom Raum-Turnus. In der Wochenansicht steht
   dann „🔒 immer Name“ bei der Aufgabe.
+* **Was das für die Bedienung heißt:** „Alles erledigt“ hakt nur die eigenen Aufgaben ab
+  (auch im Raum einer anderen Person), der Filter „Meine Aufgaben“ zeigt nur Aufgaben,
+  die wirklich dir gehören, und das App-Symbol zählt deine offenen **Aufgaben**
+  (eine tägliche Aufgabe zählt einmal, nicht siebenmal).
+  Wird eine Person gelöscht, wandern ihre fest zugewiesenen Aufgaben zurück in den Turnus.
 * **Aufgaben erstellen und bearbeiten:** Im Tab *Turnus → Räume* jede Aufgabe antippen (oder den Stift
   in der Wochenansicht) – Raum, Titel, Frequenz und Punkte lassen sich dort ändern, Aufgaben können
   in einen anderen Raum verschoben oder gelöscht werden.
