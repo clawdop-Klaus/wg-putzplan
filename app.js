@@ -16,6 +16,9 @@
 
   /* ---------- State ---------- */
   let state = load();
+  // Cache der Aufgaben (fuer schnelle Punkte-/Statistik-Berechnung).
+  // Muss VOR state = load() deklariert sein: save() greift darauf zu.
+  let taskIndexCache = null;
   let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null, weekFilter: 'all' };
   let installPrompt = null;
   let toastTimer = null;
@@ -123,6 +126,7 @@
     // benutzt - sonst glaubt das Geraet, es sei neuer als der Server, und
     // schiebt den Stand im 30-Sekunden-Takt zurueck (Endlos-Upload).
     if (!keepTime) state.updatedAt = Date.now();
+    taskIndexCache = null;                 // Aufgaben koennten sich geaendert haben
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { toast('Speichern nicht möglich'); }
     schedulePush();
   }
@@ -221,11 +225,18 @@
   function isDayTask(task) { return ((task && task.freq) || 'w') === 'd'; }
   function taskDue(task, idx) { return dueDays(task, idx).length > 0; }
   const FREQ_LABEL = { w: 'wöchentlich', '2w': 'alle 2 Wochen', m: 'monatlich' };
+  // Index aller Aufgaben (fuer schnelle Punkte-/Statistik-Berechnung).
+  // Wird bei jeder Aenderung verworfen.
+  function taskIndex() {
+    if (taskIndexCache) return taskIndexCache;
+    const idx = {};
+    state.rooms.forEach((r) => r.tasks.forEach((t) => { idx[t.id] = t; }));
+    taskIndexCache = idx;
+    return idx;
+  }
   // Aufgabe in einem Raum finden (auch ueberraeume hinweg)
   function findTask(roomId, taskId) {
-    let hit = null;
-    state.rooms.forEach((r) => r.tasks.forEach((t) => { if (t.id === taskId) hit = t; }));
-    return hit;
+    return taskIndex()[taskId] || null;
   }
   // Wer ist zustaendig: die fest zugewiesene Person oder der Raum-Turnus
   function assigneeForTask(roomId, task, idx) {
@@ -875,7 +886,11 @@
           headers: { Authorization: auth, 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!put.ok) throw new Error('Server antwortet mit ' + put.status);
+        if (!put.ok) {
+          if (put.status === 413) throw new Error('Der Plan ist zu groß für den Server (über 5 MB). Ältere Wochen aus dem Verlauf entfernen oder den Live-Sync ausschalten.');
+          if (put.status === 401) throw new Error('Zugriff verweigert – Schlüssel oder Server falsch?');
+          throw new Error('Server antwortet mit ' + put.status);
+        }
         serverFp = fp;
         setSyncStatus('ok', 'Synchronisiert ' + new Date().toLocaleTimeString('de-DE'));
       } else {
@@ -1244,8 +1259,14 @@
   function openTasksOfUser(idx) {
     let n = 0;
     state.rooms.forEach((r) => {
-      if (assigneeFor(r.id, idx) !== state.currentUser) return;
-      dueTasks(r, idx).forEach((t) => { if (!doneEntry(r.id, t.id, idx)) n++; });
+      dueTasks(r, idx).forEach((t) => {
+        // Zaehlt auch Aufgaben, die mir fest zugeteilt sind.
+        if (assigneeForTask(r.id, t, idx) !== state.currentUser) return;
+        // Eine Aufgabe zaehlt einmal - auch wenn sie an mehreren Tagen faellig ist.
+        let offen = false;
+        dueDays(t, idx).forEach((d) => { if (!taskDone(r.id, t, d, idx)) offen = true; });
+        if (offen) n++;
+      });
     });
     return n;
   }
@@ -1295,13 +1316,26 @@
     }
 
     const shown = onlyMine ? sorted.filter((r) => assigneeFor(r.id, idx) === state.currentUser) : sorted;
+    if (onlyMine) {
+      let myTasks = 0;
+      state.rooms.forEach((r) => {
+        dueTasks(r, idx).forEach((t) => {
+          if (assigneeForTask(r.id, t, idx) === state.currentUser) myTasks += dueDays(t, idx).length;
+        });
+      });
+      if (!myTasks) {
+        return '<div class="empty"><div class="empty__ico">🎉</div><h3>Heute nichts für dich</h3>' +
+          '<p>In dieser Woche ist dir kein Raum zugeteilt. Schau im <strong>Turnus</strong>, wer als Nächstes dran ist.</p>' +
+          '<p style="margin-top:14px"><button class="btn" data-action="week-filter" data-filter="all">Alle Räume zeigen</button></p></div>';
+      }
+    }
     if (onlyMine && !shown.length) {
       html += '<div class="empty"><div class="empty__ico">🎉</div><h3>Heute nichts für dich</h3>' +
         '<p>In dieser Woche ist dir kein Raum zugeteilt. Schau in den <strong>Turnus</strong>, wer als Nächstes dran ist.</p>' +
         '<p style="margin-top:14px"><button class="btn" data-action="week-filter" data-filter="all">Alle Räume zeigen</button></p></div>';
       return html;
     }
-    shown.forEach((r) => { html += roomCard(r, idx, done); });
+    shown.forEach((r) => { html += roomCard(r, idx, done, onlyMine); });
     html += quickAddCard(idx);
     html += '<div class="row no-print" style="gap:8px;margin:4px 0 8px">' +
       '<button class="btn btn--block" data-action="goto-print">🖨 Plan drucken (PDF)</button></div>';
@@ -1327,11 +1361,13 @@
 
   function heroSub(idx, p) {
     if (p.total === 0) return 'Keine Aufgaben in dieser Woche.';
-    const mine = state.rooms.filter((r) => assigneeFor(r.id, idx) === state.currentUser);
     let mineTotal = 0, mineDone = 0;
-    mine.forEach((r) => dueTasks(r, idx).forEach((t) => {
-      mineTotal++;
-      if (doneEntry(r.id, t.id, idx)) mineDone++;
+    state.rooms.forEach((r) => dueTasks(r, idx).forEach((t) => {
+      if (assigneeForTask(r.id, t, idx) !== state.currentUser) return;
+      dueDays(t, idx).forEach((d) => {
+        mineTotal++;
+        if (taskDone(r.id, t, d, idx)) mineDone++;
+      });
     }));
     const me = member(state.currentUser);
     if (mineTotal && mineDone < mineTotal) {
@@ -1367,8 +1403,12 @@
       (mine ? 'Bestätigung zurücknehmen' : 'Für ' + esc(by.name) + ' bedanken') + '">🤝 ' +
       (list.length ? list.length : 'Danke') + '</button>';
   }
-  function roomCard(r, idx, done) {
-    const tasks = dueTasks(r, idx);
+  function roomCard(r, idx, done, onlyMine) {
+    let tasks = dueTasks(r, idx);
+    // Im Filter "Meine Aufgaben" zaehlen nur die Aufgaben, die wirklich mir
+    // gehoeren - eine fest zugewiesene Aufgabe einer anderen Person nicht.
+    if (onlyMine) tasks = tasks.filter((t) => assigneeForTask(r.id, t, idx) === state.currentUser);
+    if (onlyMine && !tasks.length) return '';
     let totalCount = 0, doneCount = 0;
     tasks.forEach((t) => {
       dueDays(t, idx).forEach((d) => {
@@ -1484,8 +1524,13 @@
       weeks.map((w) => '<th>' + (w === base ? 'jetzt' : 'KW ' + isoWeek(weekStart(w)).week) + '</th>').join('') +
       '</tr></thead><tbody>';
     rooms.forEach((r) => {
+      // Hinweis, wenn einzelne Aufgaben des Raums fest zugewiesen sind
+      let festHinweis = '';
+      const feste = r.tasks.filter((t) => t.assign && member(t.assign))
+        .map((t) => t.title + ' → ' + member(t.assign).name);
+      if (feste.length) festHinweis = ' <span title="Fest zugeteilt: ' + esc(feste.join(', ')) + '">🔀</span>';
       html += '<tr><td>' + esc(r.icon || '') + ' ' + esc(r.name) +
-        (r.mode === 'fixed' ? ' <span title="Feste Zuordnung">🔒</span>' : '') + '</td>';
+        (r.mode === 'fixed' ? ' <span title="Feste Zuordnung">🔒</span>' : '') + festHinweis + '</td>';
       weeks.forEach((w) => {
         const a = assigneeFor(r.id, w);
         const m = member(a);
@@ -1606,7 +1651,8 @@
       r.tasks.forEach((t) => {
         html += '<button class="taskrow" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '">' +
           '<span class="taskrow__title">' + esc(t.title) + '</span>' +
-          '<span class="taskrow__meta">' + esc(freqLabel(t)) + '</span>' +
+          '<span class="taskrow__meta">' + esc(freqLabel(t)) +
+          (t.assign && member(t.assign) ? ' · 🔒 ' + esc(member(t.assign).name) : '') + '</span>' +
           '<span class="taskrow__pts">' + clampPoints(t.p) + ' P</span>' +
           '<span class="taskrow__pen">✎</span></button>';
       });
@@ -2208,17 +2254,22 @@
     // Erledigtes vereinen (neuere gewinnt)
     Object.keys(incoming.weeks || {}).forEach(wk => {
       const src = incoming.weeks[wk];
-      if (!src.done) return;
+      if (!src) return;
+      // Wichtig: Nicht bei fehlendem "done" abbrechen. Eine Woche kann nur
+      // taegliche Aufgaben enthalten - dann waeren die Erledigungen sonst
+      // nie synchronisiert worden.
       if (!out.weeks[wk]) out.weeks[wk] = { done: {} };
       if (!out.weeks[wk].done) out.weeks[wk].done = {};
-      Object.keys(src.done).forEach(roomId => {
-        if (!out.weeks[wk].done[roomId]) out.weeks[wk].done[roomId] = {};
-        Object.keys(src.done[roomId]).forEach(taskId => {
-          const a = out.weeks[wk].done[roomId][taskId];
-          const b = src.done[roomId][taskId];
-          if (!a || (b.at && a.at && b.at > a.at)) out.weeks[wk].done[roomId][taskId] = b;
+      if (src.done) {
+        Object.keys(src.done).forEach(roomId => {
+          if (!out.weeks[wk].done[roomId]) out.weeks[wk].done[roomId] = {};
+          Object.keys(src.done[roomId]).forEach(taskId => {
+            const a = out.weeks[wk].done[roomId][taskId];
+            const b = src.done[roomId][taskId];
+            if (!a || (b.at && a.at && b.at > a.at)) out.weeks[wk].done[roomId][taskId] = b;
+          });
         });
-      });
+      }
       if (src.notes) {
         out.weeks[wk].notes = Object.assign({}, out.weeks[wk].notes || {}, src.notes);
       }
@@ -2448,6 +2499,9 @@
         const r = room(roomId);
         if (!r) break;
         dueTasks(r, idx).forEach((t) => {
+          // Nur eigene Aufgaben abhaken - fest zugewiesene Aufgaben gehoeren
+          // einer anderen Person.
+          if (assigneeForTask(roomId, t, idx) !== state.currentUser) return;
           dueDays(t, idx).forEach((d) => {
             if (!taskDone(roomId, t, d, idx)) setDoneSilent(roomId, t.id, state.currentUser, isDayTask(t) ? d : null);
           });
@@ -2528,8 +2582,10 @@
         const m = member(id);
         if (!m) break;
         const festRaeume = state.rooms.filter((r) => r.fixedMember === id).length;
+        const festAufgaben = state.rooms.reduce((n, r) => n + r.tasks.filter((t) => t.assign === id).length, 0);
         if (!confirm('„' + m.name + '“ wirklich entfernen? Die Aufgaben bleiben im Plan, nur die Person nicht mehr.' +
-          (festRaeume ? '\n\n' + festRaeume + ' Raum/Räume waren dieser Person fest zugeordnet und wechseln zurück in den Turnus.' : ''))) break;
+          (festRaeume ? '\n\n' + festRaeume + ' Raum/Räume waren dieser Person fest zugeordnet und wechseln zurück in den Turnus.' : '') +
+          (festAufgaben ? '\n\n' + festAufgaben + ' Aufgabe(n) waren dieser Person fest zugeteilt und werden wieder im Turnus erledigt.' : ''))) break;
         state.members = state.members.filter((x) => x.id !== id);
         state.order = state.order.filter((x) => x !== id);
         if (state.currentUser === id) state.currentUser = state.members[0] ? state.members[0].id : null;
@@ -2538,8 +2594,16 @@
         state.rooms.forEach((r) => {
           if (r.fixedMember === id) { r.fixedMember = null; r.mode = 'rotation'; reverted++; }
         });
+        // Fest zugewiesene Aufgaben dieser Person gehen wieder in den Turnus
+        let freigegeben = 0;
+        state.rooms.forEach((r) => r.tasks.forEach((t) => {
+          if (t.assign === id) { t.assign = ''; freigegeben++; }
+        }));
         save(); closeSheet(); render();
-        toast(reverted ? 'Person entfernt – ' + reverted + ' Raum/Räume wieder im Turnus' : 'Person entfernt');
+        const teile = [];
+        if (reverted) teile.push(reverted + ' Raum/Räume wieder im Turnus');
+        if (freigegeben) teile.push(freigegeben + ' Aufgabe(n) freigegeben');
+        toast('Person entfernt' + (teile.length ? ' – ' + teile.join(', ') : ''));
         break;
       }
       case 'move-up': case 'move-down': {

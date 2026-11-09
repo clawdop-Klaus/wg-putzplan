@@ -332,7 +332,9 @@ export default {
 
         if (request.method === 'PUT') {
           const text = await request.text();
-          if (text.length > 1000000) return json({ error: 'too large' }, 413);
+          // 5 MB: R2 objekte duerfen weit groesser sein. Das Limit ist nur
+          // ein Schutz gegen absurde Requests.
+          if (text.length > 5000000) return json({ error: 'too large' }, 413);
           let payload;
           try { payload = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, 400); }
 
