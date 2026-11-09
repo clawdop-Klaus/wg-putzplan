@@ -1,0 +1,226 @@
+================================================================================
+WG-PUTZPLAN – INSTALLATIONSANLEITUNG
+Android und iPhone (iOS) · Stand: 09.11.2026
+================================================================================
+
+Was du brauchst: ein Android-Smartphone oder ein iPhone mit Safari, eine
+Internetverbindung (zum ersten Laden) und etwa zwei Minuten Zeit.
+
+Die App ist eine Web-App (PWA): sie wird nicht aus einem App-Store geladen,
+sondern im Browser geöffnet und wie eine normale App auf dem Homeschirm
+abgelegt. Es gibt kein Konto, kein Abo und keine Werbung.
+
+Adresse der App:
+    https://clawdop-klaus.github.io/wg-putzplan/
+
+Tipp: Speichere dir die Adresse als Lesezeichen, bevor du die App installierst.
+
+
+================================================================================
+1. ANDROID (Chrome, Samsung Internet, Edge)
+================================================================================
+
+Schritt 1 – Seite öffnen
+    Öffne Chrome und tippe auf die Adresse oben. Falls du die Adresse
+    nicht eintippen willst: den Link aus dieser Anleitung antippen.
+
+Schritt 2 – Installieren
+    Tippe oben rechts auf die drei Punkte (⋮). Je nach Gerät heißt der
+    Eintrag leicht unterschiedlich:
+        "App installieren"           (Chrome ab Version 112)
+        "Zum Startbildschirm hinzufügen"
+        "Shortcut erstellen"          (Samsung Internet)
+    Tippe darauf. Es kann sein, dass du vorher auf "Installieren" tippen
+    musst, um den Bestätigungsdialog zu öffnen.
+
+Schritt 3 – Bestätigen
+    Ein Dialog erscheint ("App installieren" / "Hinzufügen"). Tippe auf
+    "Installieren" bzw. "Hinzufügen".
+
+    Fertig. Auf dem Homeschirm liegt jetzt das Symbol "Putzplan".
+
+Schritt 4 – Erste Schritte in der App
+    a) Tippe auf das Symbol. Die App startet in der Browseransicht.
+    b) Unter "Mehr" findest du die Karte "Als App installieren" – dort kannst
+       du die Installation auch noch mal anstoßen, falls du sie übersprungen
+       hast.
+    c) Tippe oben rechts auf das Avatar-Feld und wähle, wer du bist. Die
+       Punkte und Aufgaben werden dieser Person gutgeschrieben.
+    d) Unter "Turnus" legst du deine Mitglieder und Räume an.
+
+So prüfst du, ob es geklappt hat: Öffne die App, gehe in den Browser, tippe
+auf die drei Punkte und schau, ob dort "App deinstallieren" steht. Steht da
+"App installieren", ist sie noch nicht installiert.
+
+Hinweis zu Benachrichtigungen: Chrome fragt beim ersten Mal, ob die App
+Benachrichtigungen senden darf. Erlaubst du das, bekommst du später eine
+kurze Nachricht, wenn sich der Plan ändert oder deine Erinnerungszeit ist.
+Die Meldung enthält bewusst keine Details – nur "Der Putzplan wurde
+geändert". Du musst in der App unter "Mehr" -> "Erinnerungen" auf
+"Aktivieren" tippen.
+
+
+================================================================================
+2. IPHONE / IPAD (Safari)
+================================================================================
+
+Wichtig: Auf dem iPhone funktioniert die Installation nur in Safari.
+In Chrome oder Firefox auf dem iPhone lässt sich die App nicht auf den
+Homeschirm legen. (In Chrome kannst du trotzdem Safari über "Teilen" ->
+"Auf Safari öffnen" aufrufen.)
+
+Schritt 1 – Seite in Safari öffnen
+    Öffne Safari und tippe auf die Adresse oben.
+
+Schritt 2 – Teilen-Symbol
+    Tippe auf das Teilen-Symbol (ein Quadrat mit einem Pfeil nach oben).
+    Es befindet sich in der Leiste unten (bei manchen Geräten rechts oben).
+
+Schritt 3 – "Zum Home-Bildschirm"
+    In der Liste nach unten scrollen und auf "Zum Home-Bildschirm" tippen
+    (englisch: "Add to Home Screen"). Bei iPad: "Hinzufügen zum
+    Home-Bildschirm".
+
+Schritt 4 – Name bestätigen
+    Der Name "Putzplan" kann bleiben. Tippe oben rechts auf "Hinzufügen"
+    (englisch "Add").
+
+    Fertig. Auf dem Homeschirm liegt jetzt das Symbol "Putzplan".
+
+Schritt 5 – Erste Schritte
+    Tippe auf das Symbol. Die App startet sofort im Vollbild (ohne
+    Browserleiste) – das ist der Unterschied zur normalen Seite.
+
+So prüfst du, ob es geklappt hat: Öffne die App. Steht oben keine
+Browseradresszeile mehr, ist sie installiert.
+
+Hinweis zu Benachrichtigungen (wichtig):
+    - Apple erlaubt Push-Nachrichten für installierte Web-Apps erst ab
+      iOS/iPadOS 16.4.
+    - Die App muss dafür zum Homeschirm hinzugefügt sein. Im normalen
+      Browser-Fenster (Safari-Tab) kommen keine Benachrichtigungen an.
+    - Erlaubnis erteilen: In der App auf "Mehr" -> "Erinnerungen" ->
+      "Aktivieren" tippen. Danach ggf. in den iOS-Einstellungen ->
+      "Mitteilungen" -> "Putzplan" prüfen, ob Erlaubnis erteilt ist.
+    - Auf dem iPad gilt das Gleiche. iPadOS meldet sich im Browser als
+      "Macintosh" – die App erkennt das automatisch.
+
+
+================================================================================
+3. IN DER WG ZUSAMMEN ARBEITEN
+================================================================================
+
+Ohne Konto. Ihr braucht nur einen gemeinsamen "WG-Schlüssel".
+
+Einfachste Variante (Link mit QR-Code)
+    a) Das erste Mitglied öffnet "Mehr" -> "Live-Sync" und erzeugt einen
+       Schlüssel (Button "Neu").
+    b) Es startet der Live-Sync (der Schalter "Live-Sync aktiv" muss an
+       sein).
+    c) Unter "Mehr" -> "Daten teilen & sichern" auf "Einladungs-Link (QR)"
+       tippen. Es erscheint ein QR-Code und ein Link.
+    d) Die anderen Mitglieder öffnen diesen Link auf ihrem Gerät. Sie
+       bekommen die Abfrage "Einladung annehmen?" und danach sehen sie
+       denselben Plan.
+
+Variante "Schlüssel abtippen"
+    Der Schlüssel steht in "Mehr" -> "Live-Sync" -> "WG-Schlüssel". Die
+    anderen tippen ihn in ihr eigenes Feld ein und aktivieren den Sync.
+
+Wichtig: Der Schlüssel ist der Zugang. Wer ihn hat, kann den Plan sehen und
+ändern. Deshalb nur in der WG weitergeben. Bei Verlust: einen neuen Schlüssel
+erzeugen – der alte Plan ist dann nicht mehr erreichbar.
+
+Alles bleibt auf den Geräten, wenn ihr den Live-Sync nicht einschaltet.
+Dann müsst ihr den Stand aber von Hand weitergeben (Button "Code erzeugen"
+bzw. "Als Datei sichern").
+
+
+================================================================================
+4. ERINNERUNGEN (BENACHRICHTIGUNGEN)
+================================================================================
+
+    "Mehr" -> "Erinnerungen" -> "Aktivieren"
+
+Danach kannst du einstellen:
+    - die Uhrzeit (oder "Aus")
+    - an welchen Tagen die Erinnerung kommen soll (z. B. nur Montag bis
+      Freitag; leer lassen = jeden Tag)
+
+"Testnachricht" schickt sofort eine Nachricht auf dein Gerät – damit siehst
+du sofort, ob es klappt.
+
+Was die Nachricht enthält: nur "Der Putzplan wurde geändert" oder "Zeit für
+den Putzplan". Keine Aufgaben, keine Namen. Der Server sieht vom Plan nur
+Chiffretext.
+
+
+================================================================================
+5. WENN ES NICHT KLAPPT
+================================================================================
+
+"Es kommen keine Benachrichtigungen"
+    - Android: Chrome-Einstellungen -> "Website-Einstellungen" ->
+      Benachrichtigungen prüfen.
+    - iPhone: App muss zum Homeschirm hinzugefügt sein, iOS 16.4 oder
+      neuer. In den Einstellungen -> "Mitteilungen" -> "Putzplan" prüfen.
+    - In der App: "Mehr" -> "Erinnerungen" -> Status muss "aktiv" zeigen.
+    - "Testnachricht" probieren. Kommt sie nicht, hilft meist ein Neustart
+      der App.
+
+"Die anderen sehen meinen Plan nicht"
+    - Der Schalter "Live-Sync aktiv" muss bei allen an sein.
+    - Alle müssen DENSELBEN Schlüssel haben (Leerzeichen am Anfang oder
+      Ende zählen als Unterschied).
+    - Unter "Mehr" -> "Live-Sync" steht "Zuletzt synchronisiert" mit
+      Zeitpunkt. Steht dort "Noch nicht synchronisiert", stimmt die
+      Serveradresse nicht.
+
+"Die App ist im Browser nicht mehr erreichbar"
+    - Die App funktioniert auch ohne Internet weiter (offlinefähig).
+    - Beim nächsten Mal mit Internet wird automatisch nachgeladen.
+
+"Ich habe die App aus Versehen gelöscht"
+    - Auf dem Android-Homeschirm: das Symbol gedrückt halten -> "App
+      deinstallieren" (nicht "Daten löschen").
+    - Auf dem iPhone: das Symbol gedrückt halten -> "App löschen".
+    - Achtung: Beim Löschen der App wird auch der lokale Plan gelöscht.
+      Vorher "Als Datei sichern" benutzen oder den WG-Schlüssel
+      aufbewahren.
+
+"Die Seite sieht komisch aus"
+    - In Safari: unten auf der Seite auf das Seiten-Symbol tippen und
+      "Webseite neu laden" wählen.
+    - Danach die App schließen und wieder öffnen.
+
+
+================================================================================
+6. ENTFERNEN
+================================================================================
+
+    Android: App-Symbol gedrückt halten -> "App deinstallieren" (bzw.
+             "App entfernen").
+    iPhone: App-Symbol gedrückt halten -> "App löschen" -> "App löschen".
+
+Der WG-Plan auf dem Server bleibt dabei bestehen. Er wird nur nicht mehr
+angezeigt. Wer die App neu installiert und den alten WG-Schlüssel einträgt,
+sieht den Plan wieder.
+
+
+================================================================================
+Kurz in vier Schritten
+================================================================================
+
+ANDROID
+    1. Chrome -> Adresse oeffnen
+    2. Drei-Punkte-Menü -> "App installieren"
+    3. "Installieren" bestaetigen
+    4. Icon antippen -> unter "Mehr" die WG einrichten
+
+IPHONE
+    1. Safari -> Adresse oeffnen
+    2. Teilen-Symbol -> "Zum Home-Bildschirm"
+    3. "Hinzufuegen" bestaetigen
+    4. Icon antippen -> unter "Mehr" die WG einrichten
+
+================================================================================
