@@ -10,6 +10,9 @@
   const DAY = 86400000;
   const MEMBER_COLORS = ['#4f6df5', '#12b5a5', '#f0a51b', '#e11d48', '#8b5cf6', '#0ea5e9', '#16a34a', '#db2777', '#ea580c', '#64748b'];
   const EMOJIS = ['🧑', '🧑🏻', '🧑🏽', '🧑🏿', '👩', '👨', '👧', '👦', '🧔', '🐱', '🦊', '🐼', '🐨', '🦉', '🐙', '🐝', '🦄', '🐢'];
+  const DAY_NAMES = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+  const FREQ_UNITS = { d: 'Tag', w: 'Woche', m: 'Monat' };
+  const FREQ_MAX = { d: 30, w: 52, m: 24 };
 
   /* ---------- State ---------- */
   let state = load();
@@ -35,7 +38,7 @@
         id: 'r1', name: 'Küche', icon: '🍳', color: MEMBER_COLORS[0], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't1', title: 'Geschirr abwaschen & einräumen', p: 1, freq: 'w' },
           { id: 't2', title: 'Arbeitsfläche & Herd abwischen', p: 1, freq: 'w' },
-          { id: 't3', title: 'Spüle & Wasserhahn reinigen', p: 1, freq: '2w' },
+          { id: 't3', title: 'Spüle & Wasserhahn reinigen', p: 1, freq: 'w', every: 2 },
           { id: 't4', title: 'Müll rausbringen', p: 1, freq: 'w' },
           { id: 't5', title: 'Kühlschrank auswischen', p: 2, freq: 'm' }
         ]
@@ -44,21 +47,21 @@
         id: 'r2', name: 'Bad', icon: '🚿', color: MEMBER_COLORS[1], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't6', title: 'Bad & Spiegel putzen', p: 1, freq: 'w' },
           { id: 't7', title: 'Toilette reinigen', p: 1, freq: 'w' },
-          { id: 't8', title: 'Handtücher wechseln', p: 1, freq: '2w' },
+          { id: 't8', title: 'Handtücher wechseln', p: 1, freq: 'w', every: 2 },
           { id: 't9', title: 'Fliesen & Fugen', p: 2, freq: 'm' }
         ]
       },
       {
         id: 'r3', name: 'Flur & Wohnzimmer', icon: '🛋️', color: MEMBER_COLORS[2], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't10', title: 'Staubsaugen', p: 1, freq: 'w' },
-          { id: 't11', title: 'Flur wischen', p: 1, freq: '2w' },
+          { id: 't11', title: 'Flur wischen', p: 1, freq: 'w', every: 2 },
           { id: 't12', title: 'Sofa & Polster abstauben', p: 2, freq: 'm' }
         ]
       },
       {
         id: 'r4', name: 'Müll & Recycling', icon: '🗑️', color: MEMBER_COLORS[3], mode: 'rotation', fixedMember: null, tasks: [
           { id: 't13', title: 'Mülltonnen rausbringen', p: 1, freq: 'w' },
-          { id: 't14', title: 'Altpapier & Glas trennen', p: 1, freq: '2w' },
+          { id: 't14', title: 'Altpapier & Glas trennen', p: 1, freq: 'w', every: 2 },
           { id: 't15', title: 'Pfandflaschen wegbringen', p: 2, freq: 'm' }
         ]
       }
@@ -86,7 +89,7 @@
         if (s && s.version === 1 && Array.isArray(s.members)) return normalize(s);
       }
     } catch (e) { /* defekter Speicher -> Seed */ }
-    return seed();
+    return normalize(seed());
   }
 
   function normalize(s) {
@@ -108,7 +111,7 @@
       if (!r.fixedMember || !s.members.some((m) => m.id === r.fixedMember)) r.fixedMember = null;
       if (r.mode === 'fixed' && !r.fixedMember) r.mode = 'rotation';
       r.tasks.forEach((t) => {
-        if (!t.freq) t.freq = 'w';
+        normFreq(t);
         t.p = clampPoints(t.p);
       });
     });
@@ -166,12 +169,69 @@
     const a = weekStart(idx), b = weekStart(idx - 1);
     return a.getMonth() !== b.getMonth() || a.getFullYear() !== b.getFullYear();
   }
-  function taskDue(task, idx) {
-    if (task.freq === '2w') return idx % 2 === 0;
-    if (task.freq === 'm') return isMonthStartWeek(idx);
-    return true;
+  /* ---------- Frequenz: täglich, alle x Tage, alle x Wochen, alle x Monate ----------
+     Gespeichert wird die Einheit (t/w/m) und das Intervall (every). Alte
+     Aufgaben mit '2w' werden beim Laden automatisch auf w/2 umgestellt. */
+  function normFreq(t) {
+    let freq = t.freq || 'w';
+    let every = Math.round(Number(t.every) || 1);
+    if (freq === '2w') { freq = 'w'; every = 2; }        // alte Schreibweise
+    if (freq !== 'd' && freq !== 'w' && freq !== 'm') freq = 'w';
+    if (!isFinite(every) || every < 1) every = 1;
+    if (every > FREQ_MAX[freq]) every = FREQ_MAX[freq];
+    t.freq = freq;
+    t.every = every;
+    t.assign = (t.assign === undefined || t.assign === null) ? '' : String(t.assign);
+    return t;
   }
+  function freqLabel(t) {
+    const f = (t && t.freq) || 'w';
+    const n = Math.max(1, Number(t && t.every) || 1);
+    if (f === 'd') return n === 1 ? 'täglich' : 'alle ' + n + ' Tage';
+    if (f === 'm') return n === 1 ? 'monatlich' : 'alle ' + n + ' Monate';
+    return n === 1 ? 'wöchentlich' : 'alle ' + n + ' Wochen';
+  }
+  // Absoluter Tag (seit EPOCH) zu einem Wochentag der Woche idx
+  function dayIndexOf(idx, day) {
+    const s = weekStart(idx);
+    const d = new Date(s.getFullYear(), s.getMonth(), s.getDate() + day);
+    return Math.round(utcDays(d));
+  }
+  // Monatsindex (seit EPOCH) der Woche idx
+  function monthIndexOf(idx) {
+    const s = weekStart(idx);
+    return (s.getFullYear() - EPOCH.getFullYear()) * 12 + (s.getMonth() - EPOCH.getMonth());
+  }
+  // An welchen Tagen (0 = Mo ... 6 = So) ist die Aufgabe in dieser Woche faellig?
+  function dueDays(task, idx) {
+    const f = (task && task.freq) || 'w';
+    const n = Math.max(1, Number(task && task.every) || 1);
+    if (f === 'd') {
+      const out = [];
+      for (let d = 0; d < 7; d++) if (dayIndexOf(idx, d) % n === 0) out.push(d);
+      return out;
+    }
+    if (f === 'w') return (idx % n === 0) ? [0] : [];         // die ganze Woche
+    if (f === 'm') {
+      if (!isMonthStartWeek(idx)) return [];
+      return (monthIndexOf(idx) % n === 0) ? [0] : [];
+    }
+    return [0];
+  }
+  function isDayTask(task) { return ((task && task.freq) || 'w') === 'd'; }
+  function taskDue(task, idx) { return dueDays(task, idx).length > 0; }
   const FREQ_LABEL = { w: 'wöchentlich', '2w': 'alle 2 Wochen', m: 'monatlich' };
+  // Aufgabe in einem Raum finden (auch ueberraeume hinweg)
+  function findTask(roomId, taskId) {
+    let hit = null;
+    state.rooms.forEach((r) => r.tasks.forEach((t) => { if (t.id === taskId) hit = t; }));
+    return hit;
+  }
+  // Wer ist zustaendig: die fest zugewiesene Person oder der Raum-Turnus
+  function assigneeForTask(roomId, task, idx) {
+    if (task && task.assign && member(task.assign)) return task.assign;
+    return assigneeFor(roomId, idx);
+  }
 
   /* =========================================================
      Domänenlogik
@@ -200,6 +260,27 @@
     const w = weekDone(idx);
     return (w[roomId] && w[roomId][taskId]) || null;
   }
+  // Erledigung einer taeglichen Aufgabe: ein Eintrag je Wochentag
+  function dayEntry(roomId, taskId, day, idx) {
+    const w = state.weeks[weekKey(idx)];
+    if (!w || !w.days || !w.days[roomId] || !w.days[roomId][taskId]) return null;
+    return w.days[roomId][taskId][day] || null;
+  }
+  function setDayEntry(roomId, taskId, day, idx, memberId) {
+    const wk = weekKey(idx);
+    if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
+    const w = state.weeks[wk];
+    if (!w.days) w.days = {};
+    if (!w.days[roomId]) w.days[roomId] = {};
+    if (!w.days[roomId][taskId]) w.days[roomId][taskId] = {};
+    if (memberId) w.days[roomId][taskId][day] = { by: memberId, at: Date.now() };
+    else delete w.days[roomId][taskId][day];
+  }
+  // Erledigung einer Aufgabe (woechentlich oder taeglich) an einem Tag
+  function taskDone(roomId, task, day, idx) {
+    if (isDayTask(task)) return dayEntry(roomId, task.id, day, idx);
+    return doneEntry(roomId, task.id, idx);
+  }
   function taskPoints(roomId, taskId) {
     const r = room(roomId);
     if (!r) return 1;
@@ -215,8 +296,11 @@
     let total = 0, done = 0;
     state.rooms.forEach((r) => {
       dueTasks(r, idx).forEach((t) => {
-        total++;
-        if (doneEntry(r.id, t.id, idx)) done++;
+        // Taegliche Aufgaben zaehlen je faelligem Wochentag einzeln.
+        dueDays(t, idx).forEach((d) => {
+          total++;
+          if (taskDone(r.id, t, d, idx)) done++;
+        });
       });
     });
     return { total, done, pct: total ? Math.round((done / total) * 100) : 0 };
@@ -235,6 +319,20 @@
           if (e && e.by === memberId) p += taskPoints(roomId, taskId);
         });
       });
+      // Erledigungen taeglicher Aufgaben (je Wochentag einer)
+      if (wk.days) {
+        Object.keys(wk.days).forEach((roomId) => {
+          Object.keys(wk.days[roomId]).forEach((taskId) => {
+            const t = findTask(roomId, taskId);
+            if (!t) return;                       // Aufgabe existiert nicht mehr
+            const pts = clampPoints(t.p);
+            Object.keys(wk.days[roomId][taskId]).forEach((day) => {
+              const e = wk.days[roomId][taskId][day];
+              if (e && e.by === memberId) p += pts;
+            });
+          });
+        });
+      }
     });
     return p;
   }
@@ -250,10 +348,24 @@
           if (wk.done[roomId][taskId] && wk.done[roomId][taskId].by === memberId) n++;
         });
       });
+      if (wk.days) {
+        Object.keys(wk.days).forEach((roomId) => {
+          Object.keys(wk.days[roomId]).forEach((taskId) => {
+            Object.keys(wk.days[roomId][taskId]).forEach((day) => {
+              const e = wk.days[roomId][taskId][day];
+              if (e && e.by === memberId) n++;
+            });
+          });
+        });
+      }
     });
     return n;
   }
   /* ---------- Bestätigungen („Danke"), Abwesenheiten, Pünktlichkeit ---------- */
+  // Schluessel fuer Bestätigungen: bei taeglichen Aufgaben je Wochentag eigener
+  function thanksKey(taskId, day) {
+    return (day === undefined || day === null) ? taskId : taskId + '#' + day;
+  }
   function thanksList(roomId, taskId, idx) {
     const wk = state.thanks[weekKey(idx)];
     if (!wk || !wk[roomId]) return [];
@@ -336,6 +448,15 @@
         const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
         if (doneIdx > widx) res[e.by].late++; else res[e.by].punctual++;
       }));
+      const dd = state.weeks[wk].days || {};
+      Object.keys(dd).forEach((roomId) => Object.keys(dd[roomId]).forEach((tid) => {
+        Object.keys(dd[roomId][tid]).forEach((day) => {
+          const e = dd[roomId][tid][day];
+          if (!e || !e.by || !res[e.by]) return;
+          const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
+          if (doneIdx > widx) res[e.by].late++; else res[e.by].punctual++;
+        });
+      }));
     });
     return res;
   }
@@ -359,6 +480,20 @@
     const w = weekDone(idx);
     let p = 0;
     Object.keys(w).forEach((roomId) => Object.keys(w[roomId]).forEach((tid) => { p += taskPoints(roomId, tid); }));
+    // Erledigungen taeglicher Aufgaben (je Wochentag einer)
+    const wk = state.weeks[weekKey(idx)];
+    if (wk && wk.days) {
+      Object.keys(wk.days).forEach((roomId) => {
+        Object.keys(wk.days[roomId]).forEach((tid) => {
+          const t = findTask(roomId, tid);
+          if (!t) return;
+          const pts = clampPoints(t.p);
+          Object.keys(wk.days[roomId][tid]).forEach((day) => {
+            if (wk.days[roomId][tid][day]) p += pts;
+          });
+        });
+      });
+    }
     return p;
   }
 
@@ -366,6 +501,20 @@
      möglichst gleichmäßig ist. Ergebnis wird als fester Versatz je Raum
      gespeichert, damit der Turnus von Woche zu Woche weiterläuft.
      Räume mit fester Zuordnung bleiben unangetastet. */
+  // Durchschnittliche Wochenlast einer Aufgabe – damit Raeume mit taeglichen
+  // und monatlichen Aufgaben fair miteinander verglichen werden.
+  function avgWeeklyWeight(t) {
+    const f = (t && t.freq) || 'w';
+    const n = Math.max(1, Number(t && t.every) || 1);
+    if (f === 'd') return 7 / n;
+    if (f === 'w') return 1 / n;
+    return 1 / (4.35 * n);
+  }
+  function roomWeight(r) {
+    let w = 0;
+    (r.tasks || []).forEach((t) => { w += avgWeeklyWeight(t); });
+    return w;
+  }
   function computeBalanced(rooms, order, idx) {
     const n = order.length;
     const off = {};
@@ -375,15 +524,15 @@
       if (r.mode === 'fixed') {
         off[r.id] = 0;
         const fi = order.indexOf(r.fixedMember);
-        if (fi >= 0) loads[fi] += (r.tasks || []).length;
+        if (fi >= 0) loads[fi] += roomWeight(r);
       }
     });
     rooms.filter((r) => r.mode !== 'fixed')
-      .sort((a, b) => (b.tasks || []).length - (a.tasks || []).length)
+      .sort((a, b) => roomWeight(b) - roomWeight(a))
       .forEach((r) => {
         let bi = 0;
         for (let i = 1; i < n; i++) if (loads[i] < loads[bi]) bi = i;
-        loads[bi] += (r.tasks || []).length;
+        loads[bi] += roomWeight(r);
         off[r.id] = (((bi - idx) % n) + n) % n;
       });
     return off;
@@ -487,24 +636,42 @@
     state.rooms.forEach((r, ri) => {
       const tasks = dueTasks(r, idx);
       if (!tasks.length) return;
-      const who = member(assigneeFor(r.id, idx));
-      const day = ri % 7;
-      const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 17, 0, 0);
-      const end = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 18, 0, 0);
-      const punkte = tasks.reduce((a, t) => a + clampPoints(t.p), 0);
-      const offen = tasks.filter((t) => !doneEntry(r.id, t.id, idx)).length;
-      const detail = tasks.map((t) => '• ' + t.title + ' (' + clampPoints(t.p) + ' P' +
-        (doneEntry(r.id, t.id, idx) ? ', erledigt' : '') + ')').join('\n');
-      lines.push('BEGIN:VEVENT');
-      lines.push('UID:' + r.id + '-' + weekKey(idx) + '@wg-putzplan');
-      lines.push('DTSTAMP:' + icsStamp(new Date()));
-      lines.push('DTSTART:' + icsStamp(start));
-      lines.push('DTEND:' + icsStamp(end));
-      lines.push('SUMMARY:' + icsEscape(r.name + ' putzen' + (offen ? ' (' + offen + ' offen)' : '')));
-      lines.push('DESCRIPTION:' + icsEscape(
-        'Zuständig: ' + (who ? who.name : '–') + '\n' + punkte + ' Punkte gesamt\n' + detail));
-      lines.push('CATEGORIES:WG-Putzplan,' + icsEscape(r.name));
-      lines.push('END:VEVENT');
+      const roomDay = ri % 7;
+      // Woechentliche Aufgaben kommen am Tag des Raums, taegliche an ihrem Tag.
+      const byDay = {};
+      tasks.forEach((t) => {
+        dueDays(t, idx).forEach((d) => {
+          const day = isDayTask(t) ? d : roomDay;
+          if (!byDay[day]) byDay[day] = [];
+          byDay[day].push(t);
+        });
+      });
+      Object.keys(byDay).map(Number).sort((a2, b2) => a2 - b2).forEach((day) => {
+        const dayTasks = byDay[day];
+        const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 17, 0, 0);
+        const end = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + day, 18, 0, 0);
+        const punkte = dayTasks.reduce((a2, t) => a2 + clampPoints(t.p), 0);
+        const offen = dayTasks.filter((t) => !taskDone(r.id, t, isDayTask(t) ? day : null, idx)).length;
+        const who = [];
+        dayTasks.forEach((t) => {
+          const m2 = member(assigneeForTask(r.id, t, idx));
+          if (m2 && who.indexOf(m2.name) === -1) who.push(m2.name);
+        });
+        const detail = dayTasks.map((t) => '• ' + t.title + ' (' + clampPoints(t.p) + ' P' +
+          (taskDone(r.id, t, isDayTask(t) ? day : null, idx) ? ', erledigt' : '') + ')').join('\n');
+        lines.push('BEGIN:VEVENT');
+        // Die Kennung des Raumtags bleibt wie bisher - so entstehen beim
+        // erneuten Import keine doppelten Termine.
+        lines.push('UID:' + r.id + '-' + weekKey(idx) + (day === roomDay ? '' : '-d' + day) + '@wg-putzplan');
+        lines.push('DTSTAMP:' + icsStamp(new Date()));
+        lines.push('DTSTART:' + icsStamp(start));
+        lines.push('DTEND:' + icsStamp(end));
+        lines.push('SUMMARY:' + icsEscape(r.name + ' putzen' + (offen ? ' (' + offen + ' offen)' : '')));
+        lines.push('DESCRIPTION:' + icsEscape(
+          'Zuständig: ' + (who.length ? who.join(', ') : '–') + '\n' + punkte + ' Punkte gesamt\n' + detail));
+        lines.push('CATEGORIES:WG-Putzplan,' + icsEscape(r.name));
+        lines.push('END:VEVENT');
+      });
     });
     lines.push('END:VCALENDAR');
     // Zeilenfaltung nach RFC 5545 (max. 75 Oktett je Zeile)
@@ -1144,9 +1311,9 @@
   /* ---------- Schnellerfassung (Schritt 3) ---------- */
   function quickAddCard(idx) {
     if (!state.rooms.length) return '';
-    const def = state.quickDefaults || { freq: 'w', p: 1 };
+    const def = state.quickDefaults || { freq: 'w', every: 1, p: 1 };
     return '<div class="card"><div class="card__head"><h3>Schnell Aufgabe anlegen</h3>' +
-      '<span class="card__sub">' + FREQ_LABEL[def.freq] + ' · ' + clampPoints(def.p) + ' P</span></div>' +
+      '<span class="card__sub">' + esc(freqLabel(def)) + ' · ' + clampPoints(def.p) + ' P</span></div>' +
       '<div class="quickadd">' +
       '<select class="input" id="qa-room">' +
       state.rooms.map((r) => '<option value="' + r.id + '">' + esc(r.icon || '') + ' ' + esc(r.name) + '</option>').join('') +
@@ -1185,20 +1352,31 @@
 
   // Bestätigung („Danke") für eine erledigte Aufgabe – Ausdruck der Anerkennung,
   // kein Punkt und kein Rang. Eigen erledigte Aufgaben lassen sich nicht bedanken.
-  function thanksButton(r, t, e, by, idx) {
+  function thanksButton(r, t, e, by, idx, day) {
     if (!e || !by) return '';
     if (by.id === state.currentUser) return '<span class="task__thanks task__thanks--own">✓ erledigt</span>';
-    const list = thanksList(r.id, t.id, idx);
+    // Nur taegliche Aufgaben haben einen Wochentag - bei woechentlichen Aufgaben
+    // darf kein data-day gesetzt werden, sonst landet die Bestaetigung unter
+    // einem falschen Schluessel.
+    const d = isDayTask(t) ? day : null;
+    const list = thanksList(r.id, thanksKey(t.id, d), idx);
     const mine = list.indexOf(state.currentUser) !== -1;
     return '<button class="task__thanks' + (mine ? ' is-on' : '') + '" data-action="task-thanks" data-room="' + r.id +
-      '" data-task="' + t.id + '" aria-pressed="' + (mine ? 'true' : 'false') + '" aria-label="' +
+      '" data-task="' + t.id + '"' + (d !== undefined && d !== null ? ' data-day="' + d + '"' : '') +
+      ' aria-pressed="' + (mine ? 'true' : 'false') + '" aria-label="' +
       (mine ? 'Bestätigung zurücknehmen' : 'Für ' + esc(by.name) + ' bedanken') + '">🤝 ' +
       (list.length ? list.length : 'Danke') + '</button>';
   }
   function roomCard(r, idx, done) {
     const tasks = dueTasks(r, idx);
-    const doneCount = tasks.filter((t) => doneEntry(r.id, t.id, idx)).length;
-    const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
+    let totalCount = 0, doneCount = 0;
+    tasks.forEach((t) => {
+      dueDays(t, idx).forEach((d) => {
+        totalCount++;
+        if (taskDone(r.id, t, d, idx)) doneCount++;
+      });
+    });
+    const pct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
     const who = member(assigneeFor(r.id, idx));
     const mine = assigneeFor(r.id, idx) === state.currentUser;
     const later = r.tasks.length - tasks.length;
@@ -1214,29 +1392,36 @@
         ? (who ? '🔒 Immer ' + who.emoji + ' ' + esc(who.name) : '🔒 Keine Person fest zugeordnet')
         : (who ? who.emoji + ' ' + esc(who.name) + ' ist dran' : 'Niemand ist dran')) +
       (later > 0 ? ' · ' + later + ' später' : '') + '</p></div>' +
-      '<div class="room__prog">' + doneCount + '/' + tasks.length + '</div>' +
+      '<div class="room__prog">' + doneCount + '/' + totalCount + '</div>' +
       '</div>';
 
-    if (!tasks.length) {
+    if (!totalCount) {
       html += '<div class="task"><div class="task__label" style="color:var(--muted)">In dieser Woche ist hier nichts fällig.</div></div>';
     }
     tasks.forEach((t) => {
-      const e = doneEntry(r.id, t.id, idx);
-      const by = e ? member(e.by) : null;
-      html += '<div class="task' + (e ? ' is-done' : '') + '" data-action="task" data-room="' + r.id + '" data-task="' + t.id + '">' +
-        '<div class="task__box">✓</div>' +
-        '<div class="task__label">' + esc(t.title) +
-        (t.freq !== 'w' ? '<div class="task__meta">' + FREQ_LABEL[t.freq] + '</div>' : '') + '</div>' +
-        (e && by ? '<div class="task__by"><span class="chip-avatar chip-avatar--sm" style="background:' + by.color + '">' + by.emoji + '</span>' + esc(by.name) + '</div>' : '') +
-        thanksButton(r, t, e, by, idx) +
-        '<div class="task__pts">' + clampPoints(t.p) + ' P</div>' +
-        '<button class="task__edit" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '" aria-label="Aufgabe bearbeiten">✎</button>' +
-        '</div>';
+      const days = dueDays(t, idx);
+      const fixedWho = (t.assign && member(t.assign)) ? member(t.assign) : null;
+      days.forEach((d) => {
+        const e = taskDone(r.id, t, d, idx);
+        const by = e ? member(e.by) : null;
+        const fl = freqLabel(t);
+        html += '<div class="task' + (e ? ' is-done' : '') + '" data-action="task" data-room="' + r.id + '" data-task="' + t.id + '"' +
+          (isDayTask(t) ? ' data-day="' + d + '"' : '') + '>' +
+          '<div class="task__box">✓</div>' +
+          '<div class="task__label">' + (isDayTask(t) ? '<span class="task__day">' + DAY_NAMES[d] + '</span> ' : '') + esc(t.title) +
+          (fl !== 'wöchentlich' ? '<div class="task__meta">' + esc(fl) + '</div>' : '') +
+          (fixedWho ? '<div class="task__meta">🔒 immer ' + esc(fixedWho.name) + '</div>' : '') + '</div>' +
+          (e && by ? '<div class="task__by"><span class="chip-avatar chip-avatar--sm" style="background:' + by.color + '">' + by.emoji + '</span>' + esc(by.name) + '</div>' : '') +
+          thanksButton(r, t, e, by, idx, d) +
+          '<div class="task__pts">' + clampPoints(t.p) + ' P</div>' +
+          '<button class="task__edit" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '" aria-label="Aufgabe bearbeiten">✎</button>' +
+          '</div>';
+      });
     });
 
     html += '<div class="room__foot">' +
       '<button class="btn btn--sm" data-action="room-note" data-room="' + r.id + '">📝 ' + (note ? 'Notiz ansehen' : 'Notiz') + '</button>' +
-      (doneCount < tasks.length
+      (doneCount < totalCount
         ? '<button class="btn btn--sm btn--primary" data-action="room-all" data-room="' + r.id + '">' +
           (mine ? 'Alles erledigt' : 'Alles für mich erledigt') + '</button>'
         : '<span class="pill pill--ok" style="align-self:center">✓ fertig</span>') +
@@ -1263,12 +1448,15 @@
         '<strong>' + esc(r.icon || '🧽') + ' ' + esc(r.name) + '</strong>' +
         '<span>' + (m ? esc(m.emoji + ' ' + m.name) : 'niemand') + '</span></div><ul class="print-tasks">';
       tasks.forEach((t) => {
-        const e = doneEntry(r.id, t.id, idx);
-        const by = e ? member(e.by) : null;
-        html += '<li><span class="print-box' + (e ? ' is-done' : '') + '">' + (e ? '✓' : '') + '</span>' +
-          '<span class="print-task">' + esc(t.title) + '</span>' +
-          '<span class="print-pts">' + clampPoints(t.p) + ' P</span>' +
-          (by ? '<span class="print-by">' + esc(by.name) + '</span>' : '<span class="print-by"></span>') + '</li>';
+        const who = member(assigneeForTask(r.id, t, idx));
+        dueDays(t, idx).forEach((d) => {
+          const e = taskDone(r.id, t, d, idx);
+          const by = e ? member(e.by) : null;
+          html += '<li><span class="print-box' + (e ? ' is-done' : '') + '">' + (e ? '✓' : '') + '</span>' +
+            '<span class="print-task">' + (isDayTask(t) ? '<strong>' + DAY_NAMES[d] + '</strong> ' : '') + esc(t.title) + '</span>' +
+            '<span class="print-pts">' + clampPoints(t.p) + ' P</span>' +
+            '<span class="print-by">' + esc(by ? by.name : (who ? who.name : '')) + '</span></li>';
+        });
       });
       html += '</ul></section>';
     });
@@ -1418,7 +1606,7 @@
       r.tasks.forEach((t) => {
         html += '<button class="taskrow" data-action="task-edit" data-room="' + r.id + '" data-task="' + t.id + '">' +
           '<span class="taskrow__title">' + esc(t.title) + '</span>' +
-          '<span class="taskrow__meta">' + FREQ_LABEL[t.freq] + '</span>' +
+          '<span class="taskrow__meta">' + esc(freqLabel(t)) + '</span>' +
           '<span class="taskrow__pts">' + clampPoints(t.p) + ' P</span>' +
           '<span class="taskrow__pen">✎</span></button>';
       });
@@ -1546,9 +1734,13 @@
     weeksAhead.forEach((w) => {
       state.rooms.forEach((r) => {
         const a = assigneeFor(r.id, baseAhead + w);
-        if (!a || !load[a]) return;
-        load[a].rooms++;
-        load[a].tasks += dueTasks(r, baseAhead + w).length;
+        if (a && load[a]) load[a].rooms++;
+        // Aufgaben mit fester Zuweisung zaehlen fuer die zustaendige Person.
+        dueTasks(r, baseAhead + w).forEach((t) => {
+          const who = assigneeForTask(r.id, t, baseAhead + w);
+          if (!who || !load[who]) return;
+          load[who].tasks += Math.max(1, dueDays(t, baseAhead + w).length);
+        });
       });
     });
     const maxLoad = Math.max(1, ...state.members.map((m) => load[m.id].tasks));
@@ -1568,10 +1760,16 @@
       const a = assigneeFor(r.id, idx);
       const m = member(a);
       const tasks = dueTasks(r, idx);
-      const d = tasks.filter((t) => doneEntry(r.id, t.id, idx)).length;
+      let total = 0, d = 0;
+      tasks.forEach((t) => {
+        dueDays(t, idx).forEach((day) => {
+          total++;
+          if (taskDone(r.id, t, day, idx)) d++;
+        });
+      });
       html += '<div class="row"><div class="room__icon" style="background:' + r.color + '22;font-size:16px">' + esc(r.icon || '🧽') + '</div>' +
-        '<div class="row__main"><strong>' + esc(r.name) + '</strong><span>' + (m ? m.emoji + ' ' + esc(m.name) : 'niemand') + ' · ' + d + '/' + tasks.length + '</span></div>' +
-        (d === tasks.length && tasks.length ? '<span class="pill pill--ok">fertig</span>' : '<span class="pill">' + (tasks.length ? d + '/' + tasks.length : '–') + '</span>') +
+        '<div class="row__main"><strong>' + esc(r.name) + '</strong><span>' + (m ? m.emoji + ' ' + esc(m.name) : 'niemand') + ' · ' + d + '/' + total + '</span></div>' +
+        (d === total && total ? '<span class="pill pill--ok">fertig</span>' : '<span class="pill">' + (total ? d + '/' + total : '–') + '</span>') +
         '</div>';
     });
     html += '</div>';
@@ -1818,15 +2016,25 @@
     }
     const curRoom = r0;
     const curPts = t ? clampPoints(t.p) : 1;
+    const curFreq = t ? (t.freq || 'w') : 'w';
+    const curEvery = t ? Math.max(1, Number(t.every) || 1) : 1;
 
     let body =
       '<div class="field"><label>Raum</label><select class="input" id="t-room">' +
       state.rooms.map((r) => '<option value="' + r.id + '"' + (r.id === curRoom.id ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
       '</select></div>' +
       '<div class="field"><label>Was ist zu tun?</label><input class="input" id="t-title" placeholder="z. B. Geschirr abwaschen" value="' + (t ? esc(t.title) : '') + '"></div>' +
-      '<div class="field"><label>Wie oft?</label><select class="input" id="t-freq">' +
-      ['w', '2w', 'm'].map((f) => '<option value="' + f + '"' + (t && t.freq === f ? ' selected' : '') + '>' + FREQ_LABEL[f] + '</option>').join('') +
+      '<div class="field"><label>Wie oft?</label>' +
+      '<div class="row" style="gap:8px;border:0;padding:0">' +
+      '<input class="input" type="number" id="t-every" min="1" max="' + FREQ_MAX[curFreq] + '" value="' + curEvery + '" style="flex:0 0 84px" aria-label="Intervall">' +
+      '<select class="input" id="t-unit" style="flex:1" aria-label="Einheit">' +
+      Object.keys(FREQ_UNITS).map((u) => '<option value="' + u + '"' + (curFreq === u ? ' selected' : '') + '>' + FREQ_UNITS[u] + '</option>').join('') +
       '</select></div>' +
+      '<p class="hint" id="t-freqhint" style="margin-top:6px">' + esc(freqLabel({ freq: curFreq, every: curEvery })) + '</p></div>' +
+      '<div class="field"><label>Zuständig</label><select class="input" id="t-assign">' +
+      '<option value="">wie der Raum (Turnus)</option>' +
+      state.members.map((m) => '<option value="' + m.id + '"' + (t && t.assign === m.id ? ' selected' : '') + '>' + esc(m.emoji + ' ' + m.name) + '</option>').join('') +
+      '</select><p class="hint" style="margin-top:6px">Standard: wer in dieser Woche den Raum hat. Fest: immer dieselbe Person – unabhängig vom Turnus.</p></div>' +
       '<div class="field"><label>Punkte</label><div class="points" id="t-points">' +
       [1, 2, 3, 4].map((p) => '<button class="points__btn' + (p === curPts ? ' is-active' : '') + '" data-action="pick-points" data-p="' + p + '">' +
         '<strong>' + p + '</strong><span>P</span></button>').join('') +
@@ -1988,8 +2196,12 @@
         if (!et) { ex.tasks.push(t); return; }
         if (incomingNewer) {
           et.title = t.title;
-          et.freq = t.freq || 'w';
+          normFreq(et);
+          normFreq(t);
+          et.freq = t.freq;
+          et.every = t.every;
           et.p = clampPoints(t.p);
+          et.assign = t.assign || '';
         }
       });
     });
@@ -2009,6 +2221,21 @@
       });
       if (src.notes) {
         out.weeks[wk].notes = Object.assign({}, out.weeks[wk].notes || {}, src.notes);
+      }
+      // Erledigungen taeglicher Aufaben (je Wochentag einer) vereinen
+      if (src.days) {
+        if (!out.weeks[wk].days) out.weeks[wk].days = {};
+        Object.keys(src.days).forEach(roomId => {
+          if (!out.weeks[wk].days[roomId]) out.weeks[wk].days[roomId] = {};
+          Object.keys(src.days[roomId]).forEach(taskId => {
+            if (!out.weeks[wk].days[roomId][taskId]) out.weeks[wk].days[roomId][taskId] = {};
+            Object.keys(src.days[roomId][taskId]).forEach(day => {
+              const a2 = out.weeks[wk].days[roomId][taskId][day];
+              const b2 = src.days[roomId][taskId][day];
+              if (!a2 || (b2.at && a2.at && b2.at > a2.at)) out.weeks[wk].days[roomId][taskId][day] = b2;
+            });
+          });
+        });
       }
     });
     // Bestätigungen („Danke") vereinen: die Menge der bestätigenden Personen.
@@ -2077,33 +2304,41 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, actionLabel ? 5200 : 2200);
   }
 
-  function toggleTask(roomId, taskId) {
+  function toggleTask(roomId, taskId, day) {
     const idx = currentIndex();
-    const entry = doneEntry(roomId, taskId);
+    const t = findTask(roomId, taskId);
+    const isDay = !!(t && isDayTask(t));
+    const d = isDay ? day : null;
+    const entry = taskDone(roomId, t || { id: taskId }, d, idx);
     if (!entry) {
-      setDone(roomId, taskId, state.currentUser);
-      toast('Erledigt ✓', 'Rückgängig', { name: 'undo-task', arg: roomId + '|' + taskId });
+      setDone(roomId, taskId, state.currentUser, d);
+      toast('Erledigt ✓', 'Rückgängig', { name: 'undo-task', arg: roomId + '|' + taskId + '|' + (d === null ? '' : d) });
     } else if (entry.by === state.currentUser) {
-      setDone(roomId, taskId, null);
+      setDone(roomId, taskId, null, d);
       toast('Als offen markiert');
     } else {
       const by = member(entry.by);
       openSheet('Aufgabe erledigt', '<p class="hint">Erledigt von <strong>' + (by ? esc(by.name) : 'jemand') + '</strong>.</p>' +
-        '<button class="opt" data-action="claim-task" data-room="' + roomId + '" data-task="' + taskId + '">' +
+        '<button class="opt" data-action="claim-task" data-room="' + roomId + '" data-task="' + taskId + '"' + (d !== null ? ' data-day="' + d + '"' : '') + '>' +
         '<span class="opt__ico">🙋</span><span class="opt__main"><strong>Ich war’s</strong><span>Als von mir erledigt markieren</span></span></button>' +
-        '<button class="opt" data-action="untoggle-task" data-room="' + roomId + '" data-task="' + taskId + '">' +
+        '<button class="opt" data-action="untoggle-task" data-room="' + roomId + '" data-task="' + taskId + '"' + (d !== null ? ' data-day="' + d + '"' : '') + '>' +
         '<span class="opt__ico">↩️</span><span class="opt__main"><strong>Wieder offen</strong><span>Erledigung entfernen</span></span></button>',
         '<button class="btn" data-action="close-sheet">Schließen</button>');
     }
   }
 
-  function setDone(roomId, taskId, memberId) {
-    const wk = weekKey(currentIndex());
+  function setDone(roomId, taskId, memberId, day) {
+    const idx = currentIndex();
+    const wk = weekKey(idx);
     if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
     if (!state.weeks[wk].done) state.weeks[wk].done = {};
     if (!state.weeks[wk].done[roomId]) state.weeks[wk].done[roomId] = {};
-    if (memberId) state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now() };
-    else delete state.weeks[wk].done[roomId][taskId];
+    if (day === null || day === undefined || day === '') {
+      if (memberId) state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now() };
+      else delete state.weeks[wk].done[roomId][taskId];
+    } else {
+      setDayEntry(roomId, taskId, day, idx, memberId);
+    }
     save();
     render();
   }
@@ -2123,18 +2358,20 @@
     if (!el) return;
     const a = el.dataset.action;
     const id = el.dataset.member, roomId = el.dataset.room, taskId = el.dataset.task;
+    const dayAttr = (el.dataset.day !== undefined && el.dataset.day !== '') ? parseInt(el.dataset.day, 10) : null;
 
     switch (a) {
       case 'prev-week': ui.weekOffset--; render(); break;
       case 'next-week': ui.weekOffset++; render(); break;
       case 'this-week': ui.weekOffset = 0; render(); break;
-      case 'task': toggleTask(roomId, taskId); break;
+      case 'task': toggleTask(roomId, taskId, dayAttr); break;
       case 'task-thanks': {
         const tIdx = currentIndex();
-        const ent = doneEntry(roomId, taskId, tIdx);
+        const t2 = findTask(roomId, taskId);
+        const ent = taskDone(roomId, t2 || { id: taskId }, dayAttr, tIdx);
         if (!ent || !ent.by) { toast('Diese Aufgabe ist noch nicht erledigt'); break; }
         if (ent.by === state.currentUser) { toast('Eigene Aufgaben lassen sich nicht bedanken'); break; }
-        toggleThanks(roomId, taskId, tIdx, state.currentUser);
+        toggleThanks(roomId, thanksKey(taskId, dayAttr), tIdx, state.currentUser);
         render();
         break;
       }
@@ -2209,8 +2446,11 @@
       case 'room-all': {
         const idx = currentIndex();
         const r = room(roomId);
+        if (!r) break;
         dueTasks(r, idx).forEach((t) => {
-          if (!doneEntry(roomId, t.id, idx)) setDoneSilent(roomId, t.id, state.currentUser);
+          dueDays(t, idx).forEach((d) => {
+            if (!taskDone(roomId, t, d, idx)) setDoneSilent(roomId, t.id, state.currentUser, isDayTask(t) ? d : null);
+          });
         });
         save(); render(); toast('Alles erledigt ✓');
         break;
@@ -2218,11 +2458,12 @@
       case 'undo-last': runUndo(); break;
       case 'undo-task': {
         const p = (el.dataset.arg || '').split('|');
-        if (p.length === 2) { setDone(p[0], p[1], null); toast('Rückgängig gemacht'); }
+        const d = (p.length === 3 && p[2] !== '') ? parseInt(p[2], 10) : null;
+        if (p.length >= 2) { setDone(p[0], p[1], null, d); toast('Rückgängig gemacht'); }
         break;
       }
-      case 'claim-task': setDone(roomId, taskId, state.currentUser); closeSheet(); toast('Auf mich gebucht'); break;
-      case 'untoggle-task': setDone(roomId, taskId, null); closeSheet(); toast('Als offen markiert'); break;
+      case 'claim-task': setDone(roomId, taskId, state.currentUser, dayAttr); closeSheet(); toast('Auf mich gebucht'); break;
+      case 'untoggle-task': setDone(roomId, taskId, null, dayAttr); closeSheet(); toast('Als offen markiert'); break;
       case 'room-note': sheetRoomNote(roomId); break;
       case 'save-note': {
         const idx = currentIndex();
@@ -2388,7 +2629,12 @@
         const title = ($('#t-title').value || '').trim();
         if (!title) { toast('Bitte eine Aufgabenbezeichnung eingeben'); break; }
         const targetRoomId = ($('#t-room') || {}).value || roomId;
-        const freq = ($('#t-freq') || {}).value || 'w';
+        const unit = (($('#t-unit') || {}).value) || 'w';
+        let every = Math.round(Number((($('#t-every') || {}).value) || 1));
+        if (!isFinite(every) || every < 1) every = 1;
+        if (every > FREQ_MAX[unit]) every = FREQ_MAX[unit];
+        const freq = unit;
+        const assign = (($('#t-assign') || {}).value) || '';
         const pts = clampPoints(document.querySelector('#t-points .is-active')
           ? document.querySelector('#t-points .is-active').dataset.p : 1);
         const editingId = el.dataset.task;
@@ -2399,7 +2645,7 @@
           let found = null, source = null;
           state.rooms.forEach((rr) => rr.tasks.forEach((t) => { if (t.id === editingId) { found = t; source = rr; } }));
           if (found) {
-            found.title = title; found.freq = freq; found.p = pts;
+            found.title = title; found.freq = freq; found.every = every; found.p = pts; found.assign = assign;
             if (source.id !== target.id) {
               // In einen anderen Raum verschoben – Erledigungen wandern mit,
               // sonst gingen die Punkte der Aufgabe verloren.
@@ -2407,20 +2653,28 @@
               target.tasks.push(found);
               Object.keys(state.weeks).forEach((wk) => {
                 const done = state.weeks[wk] && state.weeks[wk].done;
-                if (!done || !done[source.id] || !done[source.id][editingId]) return;
-                if (!done[target.id]) done[target.id] = {};
-                done[target.id][editingId] = done[source.id][editingId];
-                delete done[source.id][editingId];
+                if (done && done[source.id] && done[source.id][editingId]) {
+                  if (!done[target.id]) done[target.id] = {};
+                  done[target.id][editingId] = done[source.id][editingId];
+                  delete done[source.id][editingId];
+                }
+                // Erledigungen taeglicher Aufaben wandern mit
+                const days = state.weeks[wk] && state.weeks[wk].days;
+                if (days && days[source.id] && days[source.id][editingId]) {
+                  if (!days[target.id]) days[target.id] = {};
+                  days[target.id][editingId] = days[source.id][editingId];
+                  delete days[source.id][editingId];
+                }
               });
             }
           }
           toast('Aufgabe gespeichert');
         } else {
-          target.tasks.push({ id: uid('t'), title, freq, p: pts });
+          target.tasks.push(normFreq({ id: uid('t'), title, freq, every, p: pts, assign }));
           toast('Aufgabe angelegt ✓');
         }
         // Standardwerte für die Schnellerfassung merken
-        state.quickDefaults = { freq, p: pts };
+        state.quickDefaults = { freq, every, p: pts };
         save(); closeSheet(); render();
         break;
       }
@@ -2438,6 +2692,13 @@
             hist[wk] = { entry: done[r.id][taskId], note: (state.weeks[wk].notes || {})[r.id] || null };
             delete done[r.id][taskId];
           }
+          // Erledigungen taeglicher Aufaben mit sichern und loeschen
+          const days = state.weeks[wk] && state.weeks[wk].days;
+          if (days && days[r.id] && days[r.id][taskId]) {
+            hist[wk] = hist[wk] || { entry: null, note: null };
+            hist[wk].days = days[r.id][taskId];
+            delete days[r.id][taskId];
+          }
         });
         r.tasks.splice(pos, 1);
         setUndo(() => {
@@ -2448,7 +2709,12 @@
             if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
             if (!state.weeks[wk].done) state.weeks[wk].done = {};
             if (!state.weeks[wk].done[r.id]) state.weeks[wk].done[r.id] = {};
-            state.weeks[wk].done[r.id][taskId] = hist[wk].entry;
+            if (hist[wk].entry) state.weeks[wk].done[r.id][taskId] = hist[wk].entry;
+            if (hist[wk].days) {
+              if (!state.weeks[wk].days) state.weeks[wk].days = {};
+              if (!state.weeks[wk].days[r.id]) state.weeks[wk].days[r.id] = {};
+              state.weeks[wk].days[r.id][taskId] = hist[wk].days;
+            }
           });
           save(); render(); toast('Aufgabe wiederhergestellt');
         });
@@ -2529,8 +2795,8 @@
         const roomId2 = ($('#qa-room') || {}).value;
         const target = room(roomId2);
         if (!target) break;
-        const def = state.quickDefaults || { freq: 'w', p: 1 };
-        target.tasks.push({ id: uid('t'), title, freq: def.freq, p: clampPoints(def.p) });
+        const def = state.quickDefaults || { freq: 'w', every: 1, p: 1 };
+        target.tasks.push(normFreq({ id: uid('t'), title, freq: def.freq, every: def.every, p: clampPoints(def.p) }));
         save(); render();
         const inp = $('#qa-title');
         if (inp) inp.value = '';
@@ -2669,6 +2935,19 @@
       if (sc.enabled) { setSyncStatus('arbeitet', 'Verbinde …'); syncCycle(false); }
     }
   }
+  // Hinweis im Aufgaben-Dialog: „alle 3 Tage" usw.
+  function onTaskFreqField(ev) {
+    const el = ev.target;
+    if (!el || (el.id !== 't-every' && el.id !== 't-unit')) return;
+    const everyEl = $('#t-every'), unitEl = $('#t-unit'), hint = $('#t-freqhint');
+    if (!everyEl || !unitEl || !hint) return;
+    const unit = unitEl.value || 'w';
+    let every = Math.round(Number(everyEl.value) || 1);
+    if (!isFinite(every) || every < 1) every = 1;
+    if (every > FREQ_MAX[unit]) { every = FREQ_MAX[unit]; everyEl.value = every; }
+    everyEl.max = FREQ_MAX[unit];
+    hint.textContent = freqLabel({ freq: unit, every: every });
+  }
   function onPushField(ev) {
     const el = ev.target;
     if (!el || el.id !== 'push-hour') return;
@@ -2681,6 +2960,8 @@
   document.addEventListener('input', onSyncField);
   document.addEventListener('change', onSyncField);
   document.addEventListener('change', onPushField);
+  document.addEventListener('input', onTaskFreqField);
+  document.addEventListener('change', onTaskFreqField);
 
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && !$('#sheet').hidden) { closeSheet(); return; }
@@ -2694,12 +2975,17 @@
 
   $('#userbtn').addEventListener('click', sheetPickUser);
 
-  function setDoneSilent(roomId, taskId, memberId) {
-    const wk = weekKey(currentIndex());
+  function setDoneSilent(roomId, taskId, memberId, day) {
+    const idx = currentIndex();
+    const wk = weekKey(idx);
     if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
     if (!state.weeks[wk].done) state.weeks[wk].done = {};
     if (!state.weeks[wk].done[roomId]) state.weeks[wk].done[roomId] = {};
-    state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now() };
+    if (day === null || day === undefined || day === '') {
+      state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now() };
+    } else {
+      setDayEntry(roomId, taskId, day, idx, memberId);
+    }
   }
 
   function compareStates(a, b) {
@@ -2710,6 +2996,13 @@
       const d = b.weeks[wk].done || {};
       Object.keys(d).forEach(roomId => Object.keys(d[roomId]).forEach(tid => {
         if (!a.weeks[wk] || !a.weeks[wk].done || !a.weeks[wk].done[roomId] || !a.weeks[wk].done[roomId][tid]) newDone++;
+      }));
+      const dd = b.weeks[wk].days || {};
+      Object.keys(dd).forEach(roomId => Object.keys(dd[roomId]).forEach(tid => {
+        Object.keys(dd[roomId][tid]).forEach(day => {
+          const alt = a.weeks[wk] && a.weeks[wk].days && a.weeks[wk].days[roomId] && a.weeks[wk].days[roomId][tid];
+          if (!alt || !alt[day]) newDone++;
+        });
       }));
     });
     return { newDone, newPeople: names.join(', ') };
@@ -2909,6 +3202,8 @@
     get state() { return state; },
     set state(v) { state = v; },
     weekIndexOf, isoWeek, taskDue, encodeState, decodeState, mergeState, save, render, pointsOf,
-    assigneeFor, dueTasks, clampPoints
+    assigneeFor, dueTasks, clampPoints,
+    dueDays, freqLabel, normFreq, isDayTask, taskDone, dayEntry, setDayEntry,
+    assigneeForTask, findTask, dueDaysOf: dueDays, weekKey, buildIcs
   };
 })();

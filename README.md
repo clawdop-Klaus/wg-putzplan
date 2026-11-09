@@ -24,10 +24,24 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
   „Rückgängig“-Knopf; es wird exakt an der alten Stelle wiederhergestellt.
 * **Fairness** (Statistik) – zeigt, ob die Punkte gleichmäßig verteilt sind, und wie oft jede
   Person in den nächsten 4 Wochen dran ist.
+* **Punkte bei täglichen Aufgaben:** Jeder abgehakte Tag zählt als eine Erledigung
+  (mit den Punkten der Aufgabe). Eine tägliche Aufgabe mit 1 Punkt bringt also 7 Punkte
+  pro Woche – das entspricht dem tatsächlichen Aufwand.
 
 ### Aufgaben und Turnus
 
-* Jeder Raum hat eigene Aufgaben mit **Frequenz** (wöchentlich, alle 2 Wochen, monatlich) und **Punkten**.
+* Jeder Raum hat eigene Aufgaben mit **Frequenz** und **Punkten**.
+* **Frequenz:** Beim Anlegen und Bearbeiten einer Aufgabe wählbar –
+  *täglich*, *alle x Tage*, *wöchentlich*, *alle x Wochen*, *monatlich*, *alle x Monate*.
+  Man gibt das Intervall ein („alle **3** Tage“) und wählt die Einheit.
+  Bei **täglichen** Aufgaben und „alle x Tagen“ steht in der Wochenansicht eine Zeile
+  je fälligem Wochentag (Mo–So) – jede kann einzeln abgehakt werden.
+  „Alle x Wochen“ und „alle x Monate“ heißen: die Aufgabe fällt nur in jedem x-ten
+  Termin auf (Wochen bzw. Monate ab dem Planstart).
+* **Zuständig je Aufgabe:** Standard ist der Turnus des Raums (wer den Raum hat).
+  Man kann eine Aufgabe aber auch **fest einer Person** zuordnen – dann erledigt sie
+  diese Person jede Woche, unabhängig vom Raum-Turnus. In der Wochenansicht steht
+  dann „🔒 immer Name“ bei der Aufgabe.
 * **Aufgaben erstellen und bearbeiten:** Im Tab *Turnus → Räume* jede Aufgabe antippen (oder den Stift
   in der Wochenansicht) – Raum, Titel, Frequenz und Punkte lassen sich dort ändern, Aufgaben können
   in einen anderen Raum verschoben oder gelöscht werden.
