@@ -554,6 +554,8 @@
       const fp = fingerprint(planPayload());
       if (fp !== serverFp) {
         const payload = await encryptPayload(planPayload());
+        payload.cid = await changeId(fp);   // Inhaltskennung: nur mit WG-Schluessel ableitbar
+        payload.dev = deviceId();            // welches Geraet hat den Aenderungsstoss ausgeloest
         const put = await fetch(c.url.replace(/\/$/, '') + '/plan', {
           method: 'PUT',
           headers: { Authorization: auth, 'Content-Type': 'application/json' },
@@ -570,6 +572,199 @@
     } finally {
       syncing = false;
     }
+  }
+
+  /* =========================================================
+     Web-Push: Erinnerungen, ohne Konto und ohne Abo
+     ========================================================= */
+  const PUSH_HOURS = [
+    { v: -1, t: 'Aus' }, { v: 8, t: '08:00' }, { v: 10, t: '10:00' }, { v: 12, t: '12:00' },
+    { v: 15, t: '15:00' }, { v: 17, t: '17:00' }, { v: 19, t: '19:00' }, { v: 21, t: '21:00' }
+  ];
+  const DEFAULT_PUSH_HOUR = 17;
+
+  function pushCfg() {
+    const c = syncCfg();
+    if (!c.push) c.push = { enabled: false, url: '', status: 'aus', error: '', sub: null, hour: DEFAULT_PUSH_HOUR };
+    if (c.push.hour === undefined) c.push.hour = DEFAULT_PUSH_HOUR;
+    return c.push;
+  }
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  }
+  function pushPermission() {
+    try { return (typeof Notification !== 'undefined') ? Notification.permission : 'denied'; } catch (e) { return 'denied'; }
+  }
+  function isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }
+  function deviceId() {
+    let id = '';
+    try { id = localStorage.getItem('wg-putzplan-device') || ''; } catch (e) { id = ''; }
+    if (!id) {
+      id = 'g' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      try { localStorage.setItem('wg-putzplan-device', id); } catch (e) { /* egal */ }
+    }
+    return id;
+  }
+  function tzHours() { return Math.round(-new Date().getTimezoneOffset() / 60); }
+  function urlB64ToBytes(str) {
+    const s = String(str).replace(/-/g, '+').replace(/_/g, '/');
+    const pad = '='.repeat((4 - s.length % 4) % 4);
+    const bin = atob(s + pad);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function sameBytes(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  // Kennung des Planinhalts. Sie enthaelt keine Information ueber den Plan:
+  // ohne den WG-Schluessel laesst sie sich nicht zurueckrechnen.
+  async function changeId(fp) {
+    const c = syncCfg();
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(c.key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode('wg-putzplan-cid-v1:' + fp));
+    return b64(new Uint8Array(sig));
+  }
+  async function pushAuth() {
+    const c = syncCfg();
+    return 'Bearer ' + (await sha256Hex('wg-putzplan-auth:' + c.key));
+  }
+  function setPushStatus(status, text) {
+    const pc = pushCfg();
+    pc.status = status;
+    pc.error = status === 'fehler' ? (text || '') : '';
+    const el = document.getElementById('pushstatus');
+    if (el) { el.className = 'syncstatus syncstatus--' + status; el.textContent = text || status; }
+    const badge = document.getElementById('pushbadge');
+    if (badge) {
+      badge.textContent = status === 'aktiv' ? 'aktiv' : (status === 'fehler' ? 'Fehler' : (status === 'arbeitet' ? 'richte ein …' : 'aus'));
+      badge.className = 'pill ' + (status === 'aktiv' ? 'pill--ok' : (status === 'fehler' ? 'pill--danger' : ''));
+    }
+  }
+  async function pushEnable() {
+    const c = syncCfg();
+    const pc = pushCfg();
+    if (!pushSupported()) { setPushStatus('fehler', 'Dieser Browser kann keine Push-Nachrichten senden.'); save(); render(); return; }
+    if (!c.key) { toast('Zuerst den WG-Schlüssel eintragen'); return; }
+    try {
+      setPushStatus('arbeitet', 'Richte Benachrichtigungen ein …');
+      save(); render();
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        setPushStatus('fehler', 'Benachrichtigungen wurden nicht erlaubt.');
+        save(); render();
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const base = c.url.replace(/\/$/, '');
+      const keyRes = await fetch(base + '/push/key');
+      if (!keyRes.ok) throw new Error('Der Server unterstützt kein Push (Status ' + keyRes.status + ')');
+      const pub = await keyRes.json();
+      const appServerKey = urlB64ToBytes(pub.publicKey);
+      let sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        const cur = sub.options && sub.options.applicationServerKey;
+        if (!cur || !sameBytes(cur, appServerKey)) { await sub.unsubscribe(); sub = null; }
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: appServerKey });
+      const j = sub.toJSON();
+      const res = await fetch(base + '/push/sub', {
+        method: 'POST',
+        headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+      });
+      if (!res.ok) throw new Error('Abo konnte nicht gespeichert werden (Status ' + res.status + ')');
+      pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv';
+      save(); render();
+      toast('Benachrichtigungen sind aktiv ✓');
+    } catch (e) {
+      setPushStatus('fehler', 'Push konnte nicht aktiviert werden: ' + (e && e.message ? e.message : e));
+      save(); render();
+    }
+  }
+  async function pushDisable() {
+    const pc = pushCfg();
+    try {
+      if (pc.sub && pc.sub.endpoint && pc.url) {
+        await fetch(pc.url + '/push/unsub', {
+          method: 'POST',
+          headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: pc.sub.endpoint })
+        }).catch(function () {});
+      }
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) await sub.unsubscribe();
+      }
+    } catch (e) { /* lokal wird trotzdem abgeschaltet */ }
+    pc.enabled = false; pc.sub = null; pc.status = 'aus';
+    save(); render();
+    toast('Benachrichtigungen ausgeschaltet');
+  }
+  async function pushTest() {
+    const c = syncCfg();
+    const pc = pushCfg();
+    if (!pc.enabled) { toast('Erst die Benachrichtigungen aktivieren'); return; }
+    try {
+      const res = await fetch(c.url.replace(/\/$/, '') + '/push/test', {
+        method: 'POST',
+        headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const j = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error('Status ' + res.status);
+      toast('Testnachricht an ' + (j.sent || 0) + ' Gerät(e) gesendet');
+    } catch (e) {
+      toast('Testnachricht fehlgeschlagen: ' + (e && e.message ? e.message : e));
+    }
+  }
+  async function pushResubscribe() {
+    const pc = pushCfg();
+    const c = syncCfg();
+    if (!pc.enabled || !pc.sub) return;
+    try {
+      await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
+        method: 'POST',
+        headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours() })
+      });
+      toast('Erinnerungszeit gespeichert');
+    } catch (e) { toast('Konnte nicht gespeichert werden'); }
+  }
+  // Beim Start pruefen, ob das Abo noch passt (Server, Schluessel, Browser-Berechtigung)
+  async function pushStartup() {
+    const pc = pushCfg();
+    if (!pc.enabled) return;
+    const c = syncCfg();
+    if (pc.url && pc.url !== c.url.replace(/\/$/, '')) {
+      pc.enabled = false; pc.sub = null; pc.status = 'fehler';
+      pc.error = 'Serveradresse hat sich geändert – bitte neu aktivieren.';
+      save(); render();
+      return;
+    }
+    if (!pushSupported()) { pc.enabled = false; pc.status = 'aus'; save(); return; }
+    if (pushPermission() !== 'granted') {
+      pc.status = 'fehler'; pc.error = 'Benachrichtigungen sind im Browser blockiert.';
+      save(); render();
+      return;
+    }
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        pc.enabled = false; pc.status = 'fehler';
+        pc.error = 'Abo im Browser entfernt – bitte neu aktivieren.';
+        save(); render();
+        return;
+      }
+      pc.status = 'aktiv';
+      save();
+    } catch (e) { /* egal */ }
   }
 
   /* ---------- App-Badge: offene eigene Aufgaben ---------- */
@@ -1040,6 +1235,39 @@
       '<button class="btn btn--primary" data-action="sync-now" style="flex:1">Jetzt synchronisieren</button></div>' +
       '<p class="hint" style="margin-top:10px">Hinweis: Der Server liegt bei Cloudflare (R2). Kostenlos, aber pro WG ist der Schlüssel das einzige Zugangsmittel – verloren heißt: neu aufsetzen.</p>' +
       '</div>';
+
+    // ---- Erinnerungen (Web-Push) ----
+    const pc = pushCfg();
+    let pushHtml = '<div class="card"><div class="card__head"><h3>Erinnerungen</h3>' +
+      '<span class="pill ' + (pc.status === 'aktiv' ? 'pill--ok' : (pc.status === 'fehler' ? 'pill--danger' : '')) + '" id="pushbadge">' +
+      (pc.status === 'aktiv' ? 'aktiv' : (pc.status === 'fehler' ? 'Fehler' : 'aus')) + '</span></div>';
+    if (!pushSupported()) {
+      pushHtml += '<p class="hint">Dieser Browser kann keine Push-Nachrichten senden. Der Plan bleibt trotzdem synchron.</p>';
+    } else {
+      pushHtml += '<p class="hint" style="margin:-2px 0 12px">Kurze Nachricht, wenn sich der Plan ändert oder deine Erinnerungszeit kommt. ' +
+        'Die Nachricht enthält keine Details – der Server sieht nur Chiffretext.</p>';
+      if (pushPermission() === 'denied') {
+        pushHtml += '<div class="notice" style="background:#ffe4ea">Benachrichtigungen sind im Browser blockiert. Bitte in den Website-Einstellungen erlauben.</div>';
+      }
+      if (!isStandalone() && /iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        pushHtml += '<div class="notice">Auf iPhone und iPad kommen Benachrichtigungen nur, wenn die App zum Home-Bildschirm hinzugefügt wurde.</div>';
+      }
+      pushHtml += '<div id="pushstatus" class="syncstatus syncstatus--' + pc.status + '">' +
+        (pc.status === 'fehler' && pc.error ? esc(pc.error) :
+          (pc.status === 'aktiv' ? 'Benachrichtigungen sind aktiv.' : 'Noch nicht aktiv.')) +
+        '</div>';
+      pushHtml += '<div class="row" style="border:0;gap:8px;margin-top:10px">' +
+        (pc.enabled
+          ? '<button class="btn" data-action="push-off" style="flex:1">Ausschalten</button>'
+          : '<button class="btn btn--primary" data-action="push-on" style="flex:1">Aktivieren</button>') +
+        '<button class="btn" data-action="push-test" style="flex:1">Testnachricht</button></div>';
+      pushHtml += '<div class="field" style="margin-top:12px"><label>Tägliche Erinnerung</label>' +
+        '<select class="input" id="push-hour">' +
+        PUSH_HOURS.map(function (h) { return '<option value="' + h.v + '"' + (pc.hour === h.v ? ' selected' : '') + '>' + h.t + '</option>'; }).join('') +
+        '</select><p class="hint" style="margin-top:6px">Eine Erinnerung am Tag reicht meistens – wer putzt, sieht sie ohnehin im Plan.</p></div>';
+    }
+    pushHtml += '</div>';
+    html += pushHtml;
 
     html += '<div class="card"><div class="card__head"><h3>Daten teilen & sichern</h3></div>' +
       '<p class="hint">Ohne Konto: Der Stand liegt auf jedem Gerät. Mit einem Code bringst du ihn zu den anderen – oder per Datei auf den Rechner.</p>' +
@@ -1822,6 +2050,9 @@
         }).catch((e) => setSyncStatus('fehler', 'Nicht erreichbar: ' + e.message));
         break;
       }
+      case 'push-on': pushEnable(); break;
+      case 'push-off': pushDisable(); break;
+      case 'push-test': pushTest(); break;
       case 'plan-tab': ui.planTab = el.dataset.tab; render(); break;
       case 'goto-members': ui.view = 'plan'; ui.planTab = 'members'; render(); break;
       case 'goto-rooms': ui.view = 'plan'; ui.planTab = 'rooms'; render(); break;
@@ -1918,8 +2149,18 @@
       if (sc.enabled) { setSyncStatus('arbeitet', 'Verbinde …'); syncCycle(false); }
     }
   }
+  function onPushField(ev) {
+    const el = ev.target;
+    if (!el || el.id !== 'push-hour') return;
+    const pc = pushCfg();
+    pc.hour = parseInt(el.value, 10);
+    if (isNaN(pc.hour)) pc.hour = DEFAULT_PUSH_HOUR;
+    save();
+    pushResubscribe();
+  }
   document.addEventListener('input', onSyncField);
   document.addEventListener('change', onSyncField);
+  document.addEventListener('change', onPushField);
 
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && !$('#sheet').hidden) { closeSheet(); return; }
@@ -2064,6 +2305,7 @@
   applyHashCode();
   // Live-Sync: beim Start einmal abholen, danach regelmäßig
   if (syncReady()) { setTimeout(() => syncCycle(false), 800); }
+  setTimeout(pushStartup, 900);
   setInterval(() => {
     if (syncReady() && document.visibilityState === 'visible') syncCycle(false);
   }, 30000);

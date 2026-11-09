@@ -10,7 +10,7 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 | **Woche** | Alle Räume mit Aufgabenliste, Filter „Meine Aufgaben“, Wochenwechsel (‹ / ›), Aufgaben abhaken, Aufgabe direkt bearbeiten, Schnellerfassung, Kalender-Export, Notizen pro Raum, „Alles erledigt“ |
 | **Turnus** | Wochenübersicht der nächsten 6 Wochen, Reihenfolge der Mitglieder, feste oder wechselnde Raumzuordnung, automatische Verteilung, Aufgaben & Räume verwalten |
 | **Statistik** | Punkte pro Person, Fairness-Kennzahl, Auslastung der nächsten 4 Wochen, Aktivität der letzten 8 Wochen, Zustand je Raum |
-| **Mehr** | WG-Name, Hell/Dunkel, **Live-Sync** (Cloudflare), Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
+| **Mehr** | WG-Name, Hell/Dunkel, **Live-Sync** (Cloudflare), **Erinnerungen** (Web-Push), Code teilen, Code/Datei einlesen, Installation, Zurücksetzen |
 
 ### Die wichtigsten Bedienknöpfe
 
@@ -72,7 +72,7 @@ jederzeit verfügbar.
 
 * Reines HTML/CSS/JavaScript, **kein Build-Schritt**, keine Abhängigkeiten.
 * Daten im `localStorage` des Geräts (`wgputzplan.v1`).
-* Service Worker (`sw.js`) für Offline-Betrieb, Web App Manifest für die Installation.
+* Service Worker (`sw.js`) für Offline-Betrieb und Push-Empfang, Web App Manifest für die Installation.
 * Der Teilen-Code ist Base64 + `deflate-raw` komprimiert (Präfix `WGP1.Z`).
 
 ## Veröffentlichen (GitHub Pages)
@@ -124,6 +124,13 @@ Wer den Live-Sync nicht über `wg-putzplan-sync.wg-putzplan.workers.dev` nutzen 
 deployt `server-worker.js` auf den eigenen Worker (`wrangler deploy`) und trägt dessen Adresse
 im Feld *Server* ein. Nötige Bindung: ein R2-Bucket mit dem Namen `PLANS`.
 
+**Für die Erinnerungen (Push)** braucht der Worker zusätzlich:
+
+* ein Secret `VAPID_PRIVATE` (PKCS#8, base64url) – erzeugt mit
+  `node -e "const {generateKeyPairSync}=require('crypto');const k=generateKeyPairSync('ec',{namedCurve:'prime256v1',publicKeyEncoding:{type:'spki',format:'der'},privateKeyEncoding:{type:'pkcs8',format:'der'}});console.log(k.privateKey.toString('base64url'))"`
+* eine Variable `VAPID_PUBLIC` (der öffentliche Schlüssel, 65 Byte, base64url)
+* optional einen Cron-Trigger (`0 * * * *`) für die tägliche Erinnerung
+
 ## Updates & Zwischenspeicher
 
 Die App ist eine PWA: Beim ersten Öffnen werden alle Dateien in den Browser-Cache gelegt,
@@ -155,6 +162,26 @@ teilen sich denselben Stand automatisch.
 > gespeicherten Plan nicht mehr öffnen – dann muss die WG neu aufsetzen (in *Mehr* auf
 > *Zurücksetzen* und einen neuen Schlüssel erzeugen).
 
+## Erinnerungen (Web-Push)
+
+Unter *Mehr → Erinnerungen* kann die WG sich benachrichtigen lassen – ohne Konto, ohne Abo.
+
+* **Was kommt an:** eine kurze Nachricht, wenn sich der Plan geändert hat, und eine tägliche
+  Erinnerung zur selbst gewählten Uhrzeit (Voreinstellung 17 Uhr, jederzeit änderbar oder
+  abschaltbar). *Testnachricht* prüft sofort, ob es funktioniert.
+* **Was drinsteht:** nur ein Hinweis. Auf dem Server liegt kein Aufgabentext – der Plan selbst
+  bleibt Ende-zu-Ende verschlüsselt, die Push-Nachricht enthält keine Details über Aufgaben oder
+  Mitglieder.
+* **Einrichtung:** Voraussetzung ist der Live-Sync (WG-Schlüssel). Ohne ihn gibt es nichts, worauf
+  sich die Benachrichtigung beziehen könnte.
+* **iPhone/iPad:** Safari kann erst ab iOS 16.4 Benachrichtigungen senden, und nur, wenn die App
+  zum Home-Bildschirm hinzugefügt wurde. Die App weist darauf hin, wenn das fehlt.
+* **Technik:** Der Worker hält die Push-Abonnements je WG und verschickt die Nachrichten nach
+  RFC 8291/8188 verschlüsselt (AES-GCM) und mit VAPID signiert. Der private VAPID-Schlüssel liegt
+  als Secret im Worker, der öffentliche wird von der App geladen.
+* **Datenschutz:** Der Server sieht, dass ein Gerät eine Nachricht bekommt – nicht, worum es geht.
+  Abmelden genügt: *Mehr → Erinnerungen → Ausschalten* entfernt das Abo sofort.
+
 ## Datenschutz
 
 Ohne Live-Sync speichert die App **nur lokal** im `localStorage` des Geräts: Mitglieder, Räume,
@@ -163,7 +190,9 @@ angelegt, keine Analyse- oder Tracking-Skripte eingebunden. Beim Teilen per Code
 Stand nur bewusst das Gerät (als Text/Link).
 
 **Mit aktiviertem Live-Sync** wird der (verschlüsselte) Plan auf einem Cloudflare-Worker in
-einem R2-Bucket gespeichert – nur solange der Live-Sync eingeschaltet ist. Die App sendet
+einem R2-Bucket gespeichert – nur solange der Live-Sync eingeschaltet ist. Sind die Erinnerungen
+aktiv, liegen zusätzlich die Push-Abonnements (Endpunkt und Schlüssel des Geräts) auf dem Server –
+nur so lange, bis sie abgemeldet werden. Die App sendet
 dabei weder WG-Name noch Mitglieder-Namen im Klartext, wenn die Ende-zu-Ende-Verschlüsselung
 aktiv ist. Der Server kennt nur einen Hash des WG-Schlüssels (als Zugriffstoken) und den
 Chiffretext.
