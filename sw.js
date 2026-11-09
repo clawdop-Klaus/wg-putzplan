@@ -1,5 +1,5 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v7';
+const CACHE = 'wg-putzplan-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -96,11 +96,17 @@ self.addEventListener('pushsubscriptionchange', (e) => {
 
 /* stale-while-revalidate: sofort aus dem Cache liefern (offline & schnell),
    im Hintergrund vom Server aktualisieren, damit die nächste Anzeige frisch ist. */
+// Nur die App-Dateien werden zwischengespeichert. API-Antworten (Plan, Push)
+// duerfen niemals aus dem Cache kommen - sonst liefert der Worker alte Staende
+// aus und die Geraete erkennen sich nicht wieder.
+const ASSET_PATHS = ASSETS.map((p) => new URL(p, self.location.href).pathname);
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+  if (ASSET_PATHS.indexOf(url.pathname) === -1) return;
 
   e.respondWith(
     caches.open(CACHE).then((cache) => {

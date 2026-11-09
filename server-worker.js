@@ -5,8 +5,14 @@
  * - Der Client schickt als "Authorization: Bearer <hash>" einen SHA-256-Hash des WG-Schlüssels.
  * - Der R2-Key leitet sich daraus ab: niemand ohne passenden Hash kommt an den Plan.
  * - Der Inhalt ist Ende-zu-Ende verschlüsselt (AES-GCM im Browser) – der Server sieht nur Chiffretext.
- * - Push-Abos werden unter "push-<token>-<subId>" abgelegt; die Nachricht wird nach
- *   RFC 8291/8292 (aes128gcm) verschlüsselt und mit VAPID (ES256) signiert.
+ * - Push-Abos liegen je WG in einem Objekt "push-<token>"; die Nachricht wird nach
+ *   RFC 8291/8292 (aes128gcm) verschluesselt und mit VAPID (ES256) signiert.
+ *
+ * Noetige Bindungen:
+ *   PLANS         R2-Bucket (Name z. B. "wg-putzplan")
+ *   VAPID_PUBLIC  Variable: oeffentlicher VAPID-Schluessel, 65 Byte, base64url
+ *   VAPID_PRIVATE Secret: privater VAPID-Schluessel als PKCS#8, base64url
+ * Optionaler Cron-Trigger "0 * * * *" fuer die taegliche Erinnerung.
  */
 
 const CORS = {
@@ -349,7 +355,10 @@ export default {
 
         if (path === '/push/list' && request.method === 'GET') {
           const subs = await loadSubs(env, token);
-          return json({ ok: true, count: subs.length });
+          const detail = subs.map(function (s) {
+            return { id: s.id, dev: s.dev, hour: s.hour, tz: s.tz, endpoint: s.endpoint };
+          });
+          return json({ ok: true, count: subs.length, subs: detail });
         }
 
         if (path === '/push/test' && request.method === 'POST') {

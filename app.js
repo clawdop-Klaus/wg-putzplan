@@ -111,8 +111,11 @@
     return s;
   }
 
-  function save() {
-    state.updatedAt = Date.now();
+  function save(keepTime) {
+    // keepTime: den Zeitstempel nicht anfassen. Wird beim Zusammenfuehren
+    // benutzt - sonst glaubt das Geraet, es sei neuer als der Server, und
+    // schiebt den Stand im 30-Sekunden-Takt zurueck (Endlos-Upload).
+    if (!keepTime) state.updatedAt = Date.now();
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { toast('Speichern nicht möglich'); }
     schedulePush();
   }
@@ -457,10 +460,15 @@
     return out;
   }
   // Der Server sieht nur Chiffretext – WG-Schlüssel und Person sind nie Teil des Payloads.
+  // theme und quickDefaults sind Geraete-Einstellungen (wie die aktive Person) und
+  // werden nicht geteilt: sonst schieben zwei Geraete mit unterschiedlichen
+  // Einstellungen den Stand endlos hin und her.
   function planPayload() {
     const s = JSON.parse(JSON.stringify(state));
     delete s.sync;
     delete s.currentUser;
+    delete s.theme;
+    delete s.quickDefaults;
     return s;
   }
   async function encryptPayload(obj) {
@@ -481,11 +489,28 @@
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(payload.iv) }, key, unb64(payload.ct));
     return JSON.parse(new TextDecoder().decode(pt));
   }
+  // Kanonische Darstellung: Objekt-Schluessel werden sortiert, damit zwei Geraete
+  // mit gleichem Inhalt denselben Fingerprint bekommen. Ohne das erkennen sich
+  // Geraete nicht wieder, deren Erledigungen in anderer Reihenfolge im Objekt
+  // stehen - sie wuerden endlos denselben Stand hin- und herschieben.
+  function canonical(value) {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') {
+      const out = {};
+      Object.keys(value).sort().forEach(function (k) { out[k] = canonical(value[k]); });
+      return out;
+    }
+    return value;
+  }
   function fingerprint(obj) {
     // updatedAt wird bewusst ignoriert: sonst schieben zwei Geräte denselben Stand
     // im 30-Sekunden-Takt hin und her, ohne dass sich etwas ändert.
-    const copy = Object.assign({}, obj);
+    const copy = canonical(Object.assign({}, obj));
     delete copy.updatedAt;
+    // Mitglieder sind eine Menge, keine Reihenfolge
+    if (Array.isArray(copy.members)) {
+      copy.members = copy.members.slice().sort(function (a, b) { return String(a.id) < String(b.id) ? -1 : 1; });
+    }
     const s = JSON.stringify(copy);
     let h = 0;
     for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
@@ -540,7 +565,10 @@
             const merged = mergeState(state, remote);
             if (fingerprint(merged) !== fingerprint(state)) {
               state = merged;
-              save();
+              // Zeitstempel des Servers uebernehmen: das Geraet darf sich danach
+              // nicht als neuer ausgeben, sonst schiebt es den Stand zurueck.
+              state.updatedAt = Math.max(state.updatedAt || 0, remote.updatedAt || 0) || state.updatedAt;
+              save(true);
               render();
             }
           } else {
@@ -1541,7 +1569,7 @@
   function mergeState(local, incoming) {
     const out = JSON.parse(JSON.stringify(local));
     // Ist der geteilte Stand neuer, übernimmt er Einstellungen (Zuordnung, Punkte).
-    const incomingNewer = (incoming.updatedAt || 0) > (local.updatedAt || 0);
+    const incomingNewer = (incoming.updatedAt || 0) >= (local.updatedAt || 0);
     // Mitglieder
     incoming.members.forEach((m) => {
       if (!out.members.find((x) => x.id === m.id)) {
@@ -1588,6 +1616,18 @@
         out.weeks[wk].notes = Object.assign({}, out.weeks[wk].notes || {}, src.notes);
       }
     });
+    // Gemeinsame Einstellungen des Plans: der neuere Stand gewinnt.
+    // Ohne das wuerden zwei Geraete bei unterschiedlichen Werten (WG-Name,
+    // Reihenfolge, Versatz) endlos denselben Stand hin- und herschieben.
+    if (incomingNewer) {
+      if (typeof incoming.wgName === 'string' && incoming.wgName) out.wgName = incoming.wgName;
+      if (incoming.offsets && typeof incoming.offsets === 'object') out.offsets = Object.assign({}, incoming.offsets);
+      if (Array.isArray(incoming.order) && incoming.order.length) {
+        const order = incoming.order.filter(function (id) { return out.members.some(function (m) { return m.id === id; }); });
+        const rest = out.order.filter(function (id) { return order.indexOf(id) === -1; });
+        out.order = order.concat(rest);
+      }
+    }
     return out;
   }
 
