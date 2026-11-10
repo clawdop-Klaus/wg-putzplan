@@ -255,6 +255,18 @@ PUNKTE
     "Bad komplett putzen". Punkte zaehlen fuer die Person, die die Aufgabe
     erledigt hat - bei taeglichen Aufgaben also je abgehaktem Tag.
 
+FLEISSWOCHE UND DANKES (Register "Statistik")
+    In der Karte "Fleisswoche" kannst du ueber die Pfeile die Woche
+    wechseln - so siehst du die Bestaetigungen der Vorwochen.
+    "Alle erledigten Aufgaben bestaetigen" bedankt sich in einem Zug bei
+    allen, die in dieser Woche etwas erledigt haben.
+    "Wochenzusammenfassung kopieren" legt einen kurzen Text in die
+    Zwischenablage (fuer den WG-Chat).
+
+TASTATUR
+    Alles geht auch ohne Finger: mit Tab laesst sich jede Aufgabe anwaehlen,
+    Enter oder Leertaste hakelt sie ab, Escape schliesst ein Fenster.
+
 WAS DAS FUER DIE BEDIENUNG HEISST
     - "Alles erledigt" in einer Raumkarte hakt nur die Aufgaben ab, die DIR
       gehoeren. Eine Aufgabe, die fest einer anderen Person zugeteilt ist,

@@ -288,5 +288,10 @@ Chiffretext.
 - **Sync-Limit**: 5 MB pro Upload (Wochen mit nur Tagesaufgaben werden sonst
   beim Zusammenfuehren uebersprungen).
 
+- **Fleißwoche**: Wochenumschalter in der Statistikkarte, „Alle erledigten
+  Aufgaben bestätigen“ (ein Knopf für alle Dankes) und „Wochenzusammenfassung
+  kopieren“ für den WG-Chat.
+- **Tastaturbedienung**: Aufgaben lassen sich mit Tab anwählen und mit Enter
+  oder Leertaste abhaken; Escape schließt Dialoge.
 - **Feste Person pro Raum**: Im Dialog „Raum bearbeiten“ auf **Fest** stellen und
   die Person antippen – auch direkt beim Anlegen eines neuen Raums möglich.
