@@ -24,6 +24,10 @@ const CORS = {
 };
 
 const PUSH_PREFIX = 'push-';
+// Marker-Objekt: haelt fest, wann der Cron zuletzt gelaufen ist. Es liegt
+// bewusst ausserhalb der Praefixe "plan-" und "push-" und wird vom
+// Aufraeumen nicht angefasst.
+const CRON_MARKER = 'sys-cron-last';
 const RECORD_SIZE = 4096;
 const VAPID_SUBJECT = 'https://github.com/clawdop-Klaus/wg-putzplan';
 
@@ -332,12 +336,24 @@ export default {
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
     if (path === '/health') {
+      // "cronLast": wann der stuendliche Aufruf zuletzt gelaufen ist. Damit
+      // laesst sich pruefen, ob die taegliche Erinnerung wirklich ausloest.
+      let cronLast = 0, cronRuns = 0;
+      try {
+        const marker = await env.PLANS.get(CRON_MARKER);
+        if (marker) {
+          const j = JSON.parse(await marker.text());
+          cronLast = j.at || 0; cronRuns = j.runs || 0;
+        }
+      } catch (e) { /* egal */ }
       return json({
         ok: true,
         service: 'wg-putzplan-sync',
         time: Date.now(),
         push: !!(env.VAPID_PRIVATE && env.VAPID_PUBLIC),
-        vapidPublic: env.VAPID_PUBLIC || null
+        vapidPublic: env.VAPID_PUBLIC || null,
+        cronLast: cronLast,
+        cronRuns: cronRuns
       });
     }
 
@@ -553,6 +569,13 @@ export default {
       }
       cursor = res.truncated ? res.cursor : null;
       } while (cursor);
+      // Nachweis, dass der Cron wirklich gelaufen ist.
+      try {
+        const old = await env.PLANS.get(CRON_MARKER);
+        let runs = 0;
+        if (old) { try { runs = (JSON.parse(await old.text()).runs) || 0; } catch (e) { runs = 0; } }
+        await env.PLANS.put(CRON_MARKER, JSON.stringify({ at: Date.now(), runs: runs + 1 }));
+      } catch (e) { /* egal */ }
       // Einmal taeglich (3 Uhr UTC) verwaiste Abo-Listen entfernen.
       if (utcHour === 3) {
         try { await cleanupPushObjects(env); } catch (e) { /* egal */ }
