@@ -1,5 +1,7 @@
 # WG-Putzplan
 
+Version 1.1 · Stand 10.11.2026
+
 Eine Putzplan-App für WGs, die auf **iPhone/iPad (Safari)** und **Android (Chrome)** läuft.
 Kein Konto, offlinefähig – die Daten liegen auf dem Gerät. Ein Live-Sync mit
 Cloudflare ist **optional** und lässt sich jederzeit abschalten.

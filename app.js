@@ -13,6 +13,8 @@
   const DAY_NAMES = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
   const FREQ_UNITS = { d: 'Tag', w: 'Woche', m: 'Monat' };
   const FREQ_MAX = { d: 30, w: 52, m: 24 };
+  const APP_VERSION = '1.1';
+  const APP_STAND = '10.11.2026';
 
   /* ---------- State ---------- */
   let state = load();
@@ -2128,7 +2130,7 @@
       '<p class="hint" style="margin-top:8px">Die App speichert deine Daten nur auf deinem Gerät. Ohne Live-Sync geht nichts ins Internet.</p></div>';
 
     html += '<div class="card"><div class="card__head"><h3>Info</h3></div>' +
-      '<div class="row"><div class="row__main"><strong>WG-Putzplan</strong><span>Version 1.0 · offlinefähig</span></div></div>' +
+      '<div class="row"><div class="row__main"><strong>WG-Putzplan</strong><span>Version ' + APP_VERSION + ' · Stand ' + APP_STAND + ' · offlinefähig</span></div></div>' +
       '<div class="row"><div class="row__main"><strong>Letzte Änderung</strong><span>' + new Date(state.updatedAt || Date.now()).toLocaleString('de-DE') + '</span></div></div>' +
       '<button class="btn btn--danger btn--block" style="margin-top:12px" data-action="reset">Alles zurücksetzen</button></div>';
     return html;
@@ -3734,6 +3736,7 @@
     dueDays, freqLabel, normFreq, isDayTask, taskDone, dayEntry, setDayEntry,
     assigneeForTask, findTask, dueDaysOf: dueDays, weekKey, buildIcs,
     fingerprint, punctualityOverall, punctualityOf, thanksCountFor, thanksTotalFor,
+    APP_VERSION, APP_STAND, fairnessOf,
     openTasksOfUser, updateBadge, weekProgress
   };
 })();

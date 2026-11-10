@@ -1,6 +1,6 @@
 ================================================================================
 WG-PUTZPLAN – INSTALLATIONSANLEITUNG
-Android und iPhone (iOS) · Stand: 09.11.2026
+Android und iPhone (iOS) · Version 1.1 · Stand: 10.11.2026
 ================================================================================
 
 Was du brauchst: ein Android-Smartphone oder ein iPhone mit Safari, eine
@@ -156,6 +156,42 @@ du sofort, ob es klappt.
 Was die Nachricht enthält: nur "Der Putzplan wurde geändert" oder "Zeit für
 den Putzplan". Keine Aufgaben, keine Namen. Der Server sieht vom Plan nur
 Chiffretext.
+
+
+================================================================================
+4b. KURZTEST AUF DEM ECHTEN HANDY (2 MINUTEN)
+================================================================================
+
+Diese Punkte kann nur ein echtes Geraet bestaetigen - die automatischen Tests
+pruefen den Weg bis zum Push-Dienst, aber nicht die Zustellung aufs Handy.
+
+1. ERINNERUNGEN AKTIVIEREN
+       Mehr -> Erinnerungen -> "Aktivieren" -> im Browserfenster "Erlauben".
+       Danach "Testnachricht" antippen. Auf dem Handy muss binnen Sekunden
+       eine Nachricht "WG-Putzplan" erscheinen.
+
+2. TAEGLICHE ERINNERUNG
+       Stunde auf eine Zeit setzen, die in 5 Minuten liegt. Wochentage:
+       "jeden Tag" oder die gewaehlten Tage. Nach einer Stunde (der Server
+       prueft stuendlich) sollte die Nachricht kommen - oder beim naechsten
+       Oeffnen der App, falls das Handy im Energiesparmodus war.
+
+3. WOHENTAGE-WAHLE
+       Einen Tag abwaehlen (z. B. nur Montag). Am naechsten anderen Tag darf
+       KEINE Erinnerung kommen, am Montag schon.
+
+4. ZWEI HANDYS
+       Beide mit demselben WG-Schluessel einrichten. Auf einem etwas abhaken:
+       auf dem anderen erscheint es nach wenigen Sekunden ohne Neuladen.
+
+5. OFFLINE
+       Handy auf Flugmodus. Aufgabe abhaken (geht weiter). Flugmodus aus:
+       die Aenderung taucht auf dem anderen Handy auf.
+
+Wenn Schritt 1 keine Nachricht liefert: In den Browser-Einstellungen pruefen,
+ob Benachrichtigungen fuer die App erlaubt sind (iOS zusaetzlich in den
+iPhone-Einstellungen unter "Mitteilungen"). In Chrome: haelt man das
+App-Symbol gedrueckt, sieht man, ob Benachrichtigungen blockiert sind.
 
 
 ================================================================================
