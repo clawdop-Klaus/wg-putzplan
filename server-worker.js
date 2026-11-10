@@ -151,8 +151,14 @@ const PUSH_HOST_SUFFIXES = [
   'notify.windows.com'          // Edge / Windows
 ];
 // Wochentag (0 = Sonntag) eines Zeitpunkts in der Zeitzone des Geraets.
-function localWeekday(utcMs, tzHours) {
-  const d = new Date(utcMs + (tzHours || 0) * 3600000);
+// Zeitzone in Minuten (Offset). Aeltere Abos speichern ganze Stunden -
+// "tzMin" hat dann Vorrang, sonst wird "tz" (Stunden) umgerechnet.
+function tzMinutesOf(sub) {
+  if (sub && typeof sub.tzMin === 'number') return sub.tzMin;
+  return (sub && typeof sub.tz === 'number') ? sub.tz * 60 : 0;
+}
+function localWeekday(utcMs, tzMinutes) {
+  const d = new Date(utcMs + (tzMinutes || 0) * 60000);
   return d.getUTCDay();
 }
 function allowedPushEndpoint(url) {
@@ -181,14 +187,21 @@ function pushHeaders(endpoint, jwt) {
     h['apns-priority'] = '10';
     h['apns-expiration'] = String(Math.floor(Date.now() / 1000) + 3600);
     h['apns-id'] = b64u(crypto.getRandomValues(new Uint8Array(16)));
-  } else if (host.indexOf('fcm.googleapis.com') !== -1) {
-    h['Topic'] = 'wg-putzplan';
   }
+  // Kein "Topic"-Header: der gehoert nicht zum Web-Push-Protokoll und wird
+  // vom Push-Dienst ignoriert (oder mit einem 400 abgelehnt).
   return h;
 }
 async function sendPush(env, sub, payloadObj) {
   const endpoint = sub.endpoint;
   if (!endpoint || !/^https:\/\//.test(endpoint)) throw new Error('ungültiger Push-Endpunkt');
+  // Die Erlaubnisliste wird auch beim Senden geprueft - nicht nur beim
+  // Speichern. Sonst wuerde ein fremd eingeschleuster Endpunkt abgerufen.
+  if (!allowedPushEndpoint(endpoint)) {
+    const e = new Error('Push-Endpunkt nicht erlaubt');
+    e.gone = true;
+    throw e;
+  }
   const audience = new URL(endpoint).origin;
   const jwt = await vapidJwt(env, audience);
   const body = await encryptPush(sub, JSON.stringify(payloadObj));
@@ -197,10 +210,20 @@ async function sendPush(env, sub, payloadObj) {
     headers: pushHeaders(endpoint, jwt),
     body: body
   });
+  // 404/410 = Abo nicht mehr vorhanden. Manche Anbieter melden ein
+  // abgelaufenes Abo allerdings mit 400 (z. B. FCM "InvalidRegistration").
   if (res.status === 404 || res.status === 410) {
     const e = new Error('abo ungültig (' + res.status + ')');
     e.gone = true;
     throw e;
+  }
+  if (res.status === 400) {
+    const txt = await res.text().catch(function () { return ''; });
+    if (/invalidregistration|unregistered|notregistered|expired/i.test(txt)) {
+      const e = new Error('abo ungültig (400)');
+      e.gone = true;
+      throw e;
+    }
   }
   if (!res.ok) {
     const txt = await res.text().catch(function () { return ''; });
@@ -247,7 +270,17 @@ async function cleanupPushObjects(env, maxAgeDays) {
       try {
         const plan = await env.PLANS.get('plan-' + token);
         if (!plan) {
-          drop = true;                       // verwaist: es gibt keinen Plan dazu
+          // Verwaist: es gibt keinen Plan dazu. Wichtig: Das Abo nicht sofort
+          // loeschen - wer die Erinnerungen VOR dem ersten Sync einschaltet,
+          // wuerde sie sonst beim naechsten Aufraeumlauf wieder verlieren.
+          // Erst nach 30 Tagen ohne Plan gilt es als verwaist.
+          let subAge = 0;
+          try {
+            const sub = await env.PLANS.get(key);
+            const j = JSON.parse(await sub.text());
+            subAge = j.updatedAt || 0;
+          } catch (e) { subAge = 0; }
+          drop = !!subAge && (Date.now() - subAge) > 30 * 86400000;
         } else {
           let savedAt = 0;
           try { const j = JSON.parse(await plan.text()); savedAt = j.savedAt || 0; } catch (e) { savedAt = 0; }
@@ -331,16 +364,35 @@ export default {
         }
 
         if (request.method === 'PUT') {
-          const text = await request.text();
           // 5 MB: R2 objekte duerfen weit groesser sein. Das Limit ist nur
-          // ein Schutz gegen absurde Requests.
+          // ein Schutz gegen absurde Requests. Die Content-Length wird VOR dem
+          // Lesen geprueft, sonst laeuft der Worker beim Puffern in sein Limit.
+          const clen = parseInt(request.headers.get('Content-Length') || '0', 10);
+          if (clen > 5000000) return json({ error: 'too large' }, 413);
+          const text = await request.text();
           if (text.length > 5000000) return json({ error: 'too large' }, 413);
           let payload;
           try { payload = JSON.parse(text); } catch (e) { return json({ error: 'bad json' }, 400); }
+          // Schemapruefung: verhindert, dass beliebiges JSON (oder Muell) den
+          // Plan-Speicher belegt. Verschluesselte Hüllen (v/iv/ct) sind erlaubt.
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+            return json({ error: 'bad request' }, 400);
+          }
+          if (payload.members !== undefined && !Array.isArray(payload.members)) {
+            return json({ error: 'bad request' }, 400);
+          }
+          if (payload.rooms !== undefined && !Array.isArray(payload.rooms)) {
+            return json({ error: 'bad request' }, 400);
+          }
+          if (payload.members === undefined && payload.rooms === undefined && !payload.ct) {
+            return json({ error: 'bad request' }, 400);
+          }
 
           const prev = await env.PLANS.get(key);
           let prevCid = '';
-          if (prev) { try { prevCid = (JSON.parse(prev.body).cid) || ''; } catch (e) { prevCid = ''; } }
+          // Achtung: prev.body ist ein Stream - JSON.parse(prev.body) schlaegt
+          // immer fehl und wuerde jede Aenderung melden (Push-Spam).
+          if (prev) { try { prevCid = (JSON.parse(await prev.text()).cid) || ''; } catch (e) { prevCid = ''; } }
 
           payload.savedAt = Date.now();
           await env.PLANS.put(key, JSON.stringify(payload));
@@ -357,7 +409,8 @@ export default {
 
         return json({ error: 'method not allowed' }, 405);
       } catch (e) {
-        return json({ error: 'server error', detail: String(e && e.message || e) }, 500);
+        // Keine internen Details nach aussen geben.
+        return json({ error: 'server error' }, 500);
       }
     }
 
@@ -368,7 +421,8 @@ export default {
 
       try {
         if (path === '/push/sub' && request.method === 'POST') {
-          const body = await request.json();
+          let body;
+          try { body = await request.json(); } catch (e) { return json({ error: 'bad request' }, 400); }
           if (!body || !body.endpoint || !body.keys || !body.keys.p256dh || !body.keys.auth) {
             return json({ error: 'bad request' }, 400);
           }
@@ -389,6 +443,7 @@ export default {
             dev: body.dev || '',
             hour: typeof body.hour === 'number' ? body.hour : -1,
             tz: typeof body.tz === 'number' ? body.tz : 0,
+            tzMin: typeof body.tzMin === 'number' ? body.tzMin : 0,
             // Wochentage (0 = Sonntag ... 6 = Samstag). Leer = jeden Tag.
             days: Array.isArray(body.days) ? body.days.filter(function (d) { return typeof d === 'number' && d >= 0 && d <= 6; }) : [],
             createdAt: Date.now()
@@ -412,15 +467,16 @@ export default {
         }
 
         if (path === '/push/diag' && request.method === 'GET') {
-          const all = await env.PLANS.list({ limit: 20 });
-          const pre = await env.PLANS.list({ prefix: PUSH_PREFIX + token + '-', limit: 20 });
+          // WICHTIG: Nur die Objekte DIESES Tokens auflisten. Ein Blick in den
+          // ganzen Bucket wuerde die Schluessel aller anderen WGs verraten.
+          // Die Abos liegen unter "push-<token>" - ohne Bindestrich danach.
+          const pre = await env.PLANS.list({ prefix: PUSH_PREFIX + token, limit: 20 });
           let sample = null, err = '';
           if (pre.objects.length) {
             try { sample = (await pre.objects[0].text()).slice(0, 60); } catch (e) { err = String(e && e.message || e); }
           }
           return json({
-            ok: true, allCount: all.objects.length,
-            allKeys: all.objects.slice(0, 5).map(function (o) { return o.key; }),
+            ok: true,
             preCount: pre.objects.length, sample: sample, err: err,
             truncated: !!pre.truncated, cursor: pre.cursor || null
           });
@@ -429,7 +485,7 @@ export default {
         if (path === '/push/list' && request.method === 'GET') {
           const subs = await loadSubs(env, token);
           const detail = subs.map(function (s) {
-            return { id: s.id, dev: s.dev, hour: s.hour, tz: s.tz, days: s.days || [], endpoint: s.endpoint };
+            return { id: s.id, dev: s.dev, hour: s.hour, tz: s.tz, tzMin: s.tzMin, days: s.days || [], endpoint: s.endpoint };
           });
           return json({ ok: true, count: subs.length, subs: detail });
         }
@@ -443,7 +499,8 @@ export default {
 
         return json({ error: 'not found' }, 404);
       } catch (e) {
-        return json({ error: 'server error', detail: String(e && e.message || e) }, 500);
+        // Keine internen Details nach aussen geben.
+        return json({ error: 'server error' }, 500);
       }
     }
 
@@ -470,16 +527,28 @@ export default {
           const data = JSON.parse(await obj.text());
           subs = (data && Array.isArray(data.subs)) ? data.subs : [];
         } catch (e) { continue; }
+        const keep = [];
+        let dropped = 0;
         for (let j = 0; j < subs.length; j++) {
           const s = subs[j];
-          if (typeof s.hour !== 'number' || s.hour < 0) continue;
-          const local = ((utcHour + (s.tz || 0)) % 24 + 24) % 24;
-          if (local !== s.hour) continue;
+          // Abgelaufene Abos werden hier direkt entfernt - sonst sammeln sie
+          // sich und werden immer wieder versucht.
+          if (typeof s.hour !== 'number' || s.hour < 0) { keep.push(s); continue; }
+          const tzMin = tzMinutesOf(s);
+          const local = Math.floor((((utcHour * 60) + tzMin) % 1440 + 1440) % 1440 / 60);
+          if (local !== s.hour) { keep.push(s); continue; }
           // Nur an den gewaehlten Wochentagen erinnern (leer = jeder Tag).
-          if (Array.isArray(s.days) && s.days.length && s.days.indexOf(localWeekday(Date.now(), s.tz)) === -1) continue;
+          if (Array.isArray(s.days) && s.days.length && s.days.indexOf(localWeekday(Date.now(), tzMin)) === -1) { keep.push(s); continue; }
           try {
             await sendPush(env, s, MSG.remind);
-          } catch (e) { /* ein Fehler darf die anderen Geräte nicht stoppen */ }
+            keep.push(s);
+          } catch (e) {
+            if (e && e.gone) { dropped++; continue; }   // Abo ist tot -> entfernen
+            keep.push(s);   // ein Fehler darf die anderen Geraete nicht stoppen
+          }
+        }
+        if (dropped) {
+          try { await saveSubs(env, token, keep); } catch (e) { /* egal */ }
         }
       }
       cursor = res.truncated ? res.cursor : null;
