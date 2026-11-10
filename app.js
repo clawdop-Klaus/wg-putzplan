@@ -101,6 +101,8 @@
     s.weeks = s.weeks && typeof s.weeks === 'object' ? s.weeks : {};
     s.thanks = s.thanks && typeof s.thanks === 'object' ? s.thanks : {};
     s.absences = Array.isArray(s.absences) ? s.absences : [];
+    s.del = s.del && typeof s.del === 'object' ? s.del : {};
+    ['m', 'r', 't', 'c', 'n', 'a', 'k'].forEach((k) => { if (!s.del[k] || typeof s.del[k] !== 'object') s.del[k] = {}; });
     s.offsets = s.offsets && typeof s.offsets === 'object' ? s.offsets : {};
     s.order = Array.isArray(s.order) ? s.order.filter((id) => s.members.some((m) => m.id === id)) : s.members.map((m) => m.id);
     s.members.forEach((m, i) => { if (!m.color) m.color = MEMBER_COLORS[i % MEMBER_COLORS.length]; if (!m.emoji) m.emoji = '🧑'; });
@@ -121,11 +123,44 @@
     return s;
   }
 
+  /* ---------- Loesch-Markierungen (Tombstones) ----------
+     Damit Loeschungen zwischen den Geraeten wandern, wird zu jedem geloeschten
+     Objekt eine Markierung mit Zeitstempel abgelegt. Beim Zusammenfuehren
+     gewinnt die Markierung, wenn sie juenger ist als der eingehende Eintrag. */
+  const DEL_MAX_AGE = 180 * 86400000;   // Markierungen nach 6 Monaten verfallen
+  function delMarks() {
+    if (!state.del || typeof state.del !== 'object') state.del = {};
+    ['m', 'r', 't', 'c', 'n', 'a', 'k'].forEach((k) => {
+      if (!state.del[k] || typeof state.del[k] !== 'object') state.del[k] = {};
+    });
+    return state.del;
+  }
+  function markDel(kind, key, ts) {
+    if (!key) return;
+    const d = delMarks();
+    d[kind][key] = ts || Date.now();
+  }
+  function delMark(kind, key) {
+    const d = state.del && state.del[kind];
+    return d && d[key] ? d[key] : 0;
+  }
+  // Alte Markierungen entfernen, damit die Datei nicht unbegrenzt waechst.
+  function pruneDelMarks() {
+    const d = state.del;
+    if (!d) return;
+    const now = Date.now();
+    ['m', 'r', 't', 'c', 'n', 'a', 'k'].forEach((k) => {
+      if (!d[k]) return;
+      Object.keys(d[k]).forEach((key) => { if (now - d[k][key] > DEL_MAX_AGE) delete d[k][key]; });
+    });
+  }
+
   function save(keepTime) {
     // keepTime: den Zeitstempel nicht anfassen. Wird beim Zusammenfuehren
     // benutzt - sonst glaubt das Geraet, es sei neuer als der Server, und
     // schiebt den Stand im 30-Sekunden-Takt zurueck (Endlos-Upload).
     if (!keepTime) state.updatedAt = Date.now();
+    pruneDelMarks();
     taskIndexCache = null;                 // Aufgaben koennten sich geaendert haben
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { toast('Speichern nicht möglich'); }
     schedulePush();
@@ -291,11 +326,15 @@
     if (isDayTask(task)) return dayEntry(roomId, task.id, day, idx);
     return doneEntry(roomId, task.id, idx);
   }
-  function taskPoints(roomId, taskId) {
+  function taskPoints(roomId, taskId, entry) {
     const r = room(roomId);
-    if (!r) return 1;
+    if (!r) {
+      // Raum geloescht: der im Erledigungs-Eintrag gespeicherte Wert bleibt.
+      return entry && entry.p ? clampPoints(entry.p) : 1;
+    }
     const t = r.tasks.find((x) => x.id === taskId);
-    return t ? clampPoints(t.p) : 1;
+    if (t) return clampPoints(t.p);
+    return entry && entry.p ? clampPoints(entry.p) : 1;
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function clampPoints(p) {
@@ -320,13 +359,18 @@
     Object.keys(state.weeks).forEach((wkKeyS) => {
       const wk = state.weeks[wkKeyS];
       if (!wk.done) return;
-      // Wer im Urlaub oder krank war, sammelt in dieser Woche keine Punkte an.
+      // Wer im Urlaub oder krank war, sammelt in diesem Zeitraum keine Punkte
+      // an. Eine eintaegige Abwesenheit pausiert nur diesen Tag - nicht die
+      // ganze Woche.
       const widx = weekIndexFromKey(wkKeyS);
-      if (widx !== null && absenceFor(memberId, widx)) return;
+      const ab = widx !== null ? absenceFor(memberId, widx) : null;
       Object.keys(wk.done).forEach((roomId) => {
         Object.keys(wk.done[roomId]).forEach((taskId) => {
           const e = wk.done[roomId][taskId];
-          if (e && e.by === memberId) p += taskPoints(roomId, taskId);
+          if (e && e.by === memberId) {
+            if (ab && dateInAbsence(ab, e.at)) return;
+            p += taskPoints(roomId, taskId, e);
+          }
         });
       });
       // Erledigungen taeglicher Aufgaben (je Wochentag einer)
@@ -338,7 +382,10 @@
             const pts = clampPoints(t.p);
             Object.keys(wk.days[roomId][taskId]).forEach((day) => {
               const e = wk.days[roomId][taskId][day];
-              if (e && e.by === memberId) p += pts;
+              if (e && e.by === memberId) {
+                if (ab && dateInAbsence(ab, e.at)) return;
+                p += pts;
+              }
             });
           });
         });
@@ -376,19 +423,40 @@
   function thanksKey(taskId, day) {
     return (day === undefined || day === null) ? taskId : taskId + '#' + day;
   }
-  function thanksList(roomId, taskId, idx) {
+  // Dankes werden als Zuordnung Person -> Zeitstempel gespeichert. So kann ein
+  // zurueckgenommenes Danke zwischen den Geraeten verschwinden (eine reine
+  // Mengenvereinigung wuerde es immer wieder herholen).
+  function thanksMap(roomId, taskId, idx) {
     const wk = state.thanks[weekKey(idx)];
-    if (!wk || !wk[roomId]) return [];
-    return Array.isArray(wk[roomId][taskId]) ? wk[roomId][taskId] : [];
+    if (!wk || !wk[roomId]) return null;
+    const v = wk[roomId][taskId];
+    if (!v) return null;
+    if (Array.isArray(v)) {
+      const m = {};
+      v.forEach((id) => { m[id] = Date.now(); });
+      wk[roomId][taskId] = m;
+      return m;
+    }
+    return typeof v === 'object' ? v : null;
+  }
+  function thanksList(roomId, taskId, idx) {
+    const m = thanksMap(roomId, taskId, idx);
+    return m ? Object.keys(m) : [];
   }
   function toggleThanks(roomId, taskId, idx, memberId) {
     const wk = weekKey(idx);
     if (!state.thanks[wk]) state.thanks[wk] = {};
     if (!state.thanks[wk][roomId]) state.thanks[wk][roomId] = {};
-    const list = thanksList(roomId, taskId, idx).slice();
-    const i = list.indexOf(memberId);
-    if (i >= 0) list.splice(i, 1); else list.push(memberId);
-    state.thanks[wk][roomId][taskId] = list;
+    const m = thanksMap(roomId, taskId, idx) || {};
+    const key = wk + '|' + roomId + '|' + taskId + '|' + memberId;
+    if (m[memberId] !== undefined) {
+      delete m[memberId];
+      markDel('k', key);          // zurueckgenommenes Danke merken
+    } else {
+      m[memberId] = Date.now();
+      if (state.del && state.del.k) delete state.del.k[key];
+    }
+    state.thanks[wk][roomId][taskId] = m;
     save();
   }
   // Wie oft wurde diese Person in dieser Woche bedankt?
@@ -397,8 +465,21 @@
     const wk = state.thanks[weekKey(idx)];
     if (!wk) return 0;
     Object.keys(wk).forEach((roomId) => Object.keys(wk[roomId]).forEach((tid) => {
+      const map = wk[roomId][tid];
+      const list = Array.isArray(map) ? map : Object.keys(map || {});
+      // woechentliche Aufgaben
       const e = doneEntry(roomId, tid, idx);
-      if (e && e.by === memberId) n += (wk[roomId][tid] || []).length;
+      if (e && e.by === memberId) n += list.length;
+      // Tagesaufgaben: je Wochentag ein eigener Dank (Schluessel "aufgabe#tag")
+      const key = tid + '#';
+      Object.keys(wk[roomId]).forEach((k2) => {
+        if (k2.indexOf(key) !== 0) return;
+        const m2 = wk[roomId][k2];
+        const l2 = Array.isArray(m2) ? m2 : Object.keys(m2 || {});
+        const day = parseInt(k2.slice(key.length), 10);
+        const e2 = dayEntry(roomId, tid, day, idx);
+        if (e2 && e2.by === memberId) n += l2.length;
+      });
     }));
     return n;
   }
@@ -407,7 +488,8 @@
     const wk = state.thanks[weekKey(idx)];
     if (!wk) return 0;
     Object.keys(wk).forEach((roomId) => Object.keys(wk[roomId]).forEach((tid) => {
-      n += (wk[roomId][tid] || []).length;
+      const map = wk[roomId][tid];
+      n += Array.isArray(map) ? map.length : Object.keys(map || {}).length;
     }));
     return n;
   }
@@ -427,6 +509,17 @@
     const f = parseDay(a.from), t = parseDay(a.to);
     if (!f || !t) return false;
     return f <= to && t >= from;
+  }
+  // Liegt der Zeitpunkt (Zeitstempel einer Erledigung) in der Abwesenheit?
+  // Ohne Zeitstempel wird die ganze Woche als betroffen gewertet.
+  function dateInAbsence(ab, ts) {
+    if (!ab) return false;
+    if (!ts) return true;
+    const f = parseDay(ab.from), t = parseDay(ab.to);
+    if (!f || !t) return false;
+    const d = new Date(ts);
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return day >= f && day <= t;
   }
   // Abwesenheit, die die Woche idx betrifft
   function absenceFor(memberId, idx) {
@@ -482,6 +575,16 @@
         const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
         if (doneIdx > widx) l++; else p++;
       }));
+      // Erledigungen taeglicher Aufgaben mitzaehlen (je Wochentag einer)
+      const dd = state.weeks[wk].days || {};
+      Object.keys(dd).forEach((roomId) => Object.keys(dd[roomId]).forEach((tid) => {
+        Object.keys(dd[roomId][tid]).forEach((day) => {
+          const e = dd[roomId][tid][day];
+          if (!e || !e.by) return;
+          const doneIdx = e.at ? weekIndexOf(new Date(e.at)) : widx;
+          if (doneIdx > widx) l++; else p++;
+        });
+      }));
     });
     const t = p + l;
     return { punctual: p, late: l, pct: t ? Math.round((p * 100) / t) : 0 };
@@ -489,7 +592,7 @@
   function weekPointTotal(idx) {
     const w = weekDone(idx);
     let p = 0;
-    Object.keys(w).forEach((roomId) => Object.keys(w[roomId]).forEach((tid) => { p += taskPoints(roomId, tid); }));
+    Object.keys(w).forEach((roomId) => Object.keys(w[roomId]).forEach((tid) => { p += taskPoints(roomId, tid, w[roomId][tid]); }));
     // Erledigungen taeglicher Aufgaben (je Wochentag einer)
     const wk = state.weeks[weekKey(idx)];
     if (wk && wk.days) {
@@ -687,15 +790,28 @@
     // Zeilenfaltung nach RFC 5545 (max. 75 Oktett je Zeile)
     return lines.map(foldIcsLine).join('\r\n');
   }
+  // RFC 5545: hoechstens 75 Oktett je Zeile. Wichtig sind Oktette, nicht
+  // Zeichen - "ä" und "•" brauchen mehr als ein Byte.
   function foldIcsLine(line) {
-    if (line.length <= 73) return line;
+    const enc = new TextEncoder();
+    if (enc.encode(line).length <= 75) return line;
     const out = [];
     let rest = line;
-    out.push(rest.slice(0, 73));
-    rest = rest.slice(73);
+    let first = true;
     while (rest.length) {
-      out.push(' ' + rest.slice(0, 72));
-      rest = rest.slice(72);
+      // Zeichenweise, aber nach Oktettgrenze schneiden (nicht mitten im Zeichen).
+      let take = first ? 73 : 71;   // Platz fuer das fuehrende Leerzeichen
+      let used = 0;
+      let cut = 0;
+      for (let i = 0; i < rest.length; i++) {
+        const len = enc.encode(rest[i]).length;
+        if (used + len > take) break;
+        used += len; cut = i + 1;
+      }
+      if (cut === 0) cut = 1;   // mindestens ein Zeichen (darf nicht haengen)
+      out.push((first ? '' : ' ') + rest.slice(0, cut));
+      rest = rest.slice(cut);
+      first = false;
     }
     return out.join('\r\n');
   }
@@ -722,11 +838,20 @@
     return !!(c.enabled && c.key && c.url);
   }
   function newWgKey() {
-    const bytes = new Uint8Array(24);
-    crypto.getRandomValues(bytes);
+    // Ohne Modulo-Verzerrung: 57 Zeichen passen nicht gleich oft auf 256
+    // Byte-Werte. Deshalb werden zu grosse Werte verworfen.
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const n = alphabet.length;
+    const limit = Math.floor(256 / n) * n;   // 57 * 4 = 228
     let out = '';
-    for (let i = 0; i < bytes.length; i++) out += alphabet[bytes[i] % alphabet.length];
+    while (out.length < 24) {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      for (let i = 0; i < bytes.length && out.length < 24; i++) {
+        if (bytes[i] >= limit) continue;      // verzerrte Werte verwerfen
+        out += alphabet[bytes[i] % n];
+      }
+    }
     return out;
   }
   async function sha256Hex(text) {
@@ -803,9 +928,17 @@
     // im 30-Sekunden-Takt hin und her, ohne dass sich etwas ändert.
     const copy = canonical(Object.assign({}, obj));
     delete copy.updatedAt;
-    // Mitglieder sind eine Menge, keine Reihenfolge
+    // Mitglieder, Raeume und die Reihenfolge sind Mengen, keine Listen.
+    // Sonst erkennen sich zwei Geraete mit gleichem Inhalt, aber anderer
+    // Reihenfolge nie und schieben den Stand endlos hin und her.
     if (Array.isArray(copy.members)) {
       copy.members = copy.members.slice().sort(function (a, b) { return String(a.id) < String(b.id) ? -1 : 1; });
+    }
+    if (Array.isArray(copy.rooms)) {
+      copy.rooms = copy.rooms.slice().sort(function (a, b) { return String(a.id) < String(b.id) ? -1 : 1; });
+    }
+    if (Array.isArray(copy.order)) {
+      copy.order = copy.order.slice().sort();
     }
     const s = JSON.stringify(copy);
     let h = 0;
@@ -837,7 +970,10 @@
   }
   async function syncCycle(pushOnly, force) {
     const c = syncCfg();
-    if (syncing) return;
+    if (syncing) {
+      if (force) toast('Synchronisierung läuft bereits');
+      return;
+    }
     if (!force && !c.enabled) return;
     if (!c.key || !c.url) return;
     syncing = true;
@@ -886,7 +1022,7 @@
           body: JSON.stringify(payload)
         });
         if (!put.ok) {
-          if (put.status === 413) throw new Error('Der Plan ist zu groß für den Server (über 5 MB). Ältere Wochen aus dem Verlauf entfernen oder den Live-Sync ausschalten.');
+          if (put.status === 413) throw new Error('Der Plan ist zu groß für den Server (über 5 MB). Bitte den Live-Sync ausschalten und den Plan teilen – oder später mit weniger Wochenhistorie erneut versuchen.');
           if (put.status === 401) throw new Error('Zugriff verweigert – Schlüssel oder Server falsch?');
           throw new Error('Server antwortet mit ' + put.status);
         }
@@ -948,6 +1084,9 @@
     return id;
   }
   function tzHours() { return Math.round(-new Date().getTimezoneOffset() / 60); }
+  // Offset in Minuten - sonst gaeben Zonen wie UTC+5:30 (Indien) die
+  // falsche Uhrzeit an.
+  function tzMinutes() { return -new Date().getTimezoneOffset(); }
   function urlB64ToBytes(str) {
     const s = String(str).replace(/-/g, '+').replace(/_/g, '/');
     const pad = '='.repeat((4 - s.length % 4) % 4);
@@ -995,7 +1134,7 @@
     const res = await fetch(base + '/push/sub', {
       method: 'POST',
       headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
+      body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), tzMin: tzMinutes(), days: pc.days || [] })
     });
     return !!res.ok;
   }
@@ -1031,7 +1170,7 @@
       const res = await fetch(base + '/push/sub', {
         method: 'POST',
         headers: { Authorization: auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
+        body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), tzMin: tzMinutes(), days: pc.days || [] })
       });
       if (!res.ok) throw new Error('Abo konnte nicht gespeichert werden (Status ' + res.status + ')');
       pc.enabled = true; pc.url = base; pc.sub = j; pc.status = 'aktiv'; pc.auth = auth;
@@ -1088,7 +1227,7 @@
       await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
         method: 'POST',
         headers: { Authorization: await pushAuth(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
+        body: JSON.stringify({ endpoint: pc.sub.endpoint, keys: pc.sub.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), tzMin: tzMinutes(), days: pc.days || [] })
       });
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.ready.then(function (reg) { pushCredToWorker(reg); }).catch(function () {});
@@ -1113,6 +1252,7 @@
           dev: deviceId(),
           hour: pc.hour,
           tz: tzHours(),
+          tzMin: tzMinutes(),
           // Wochentage mitgeben: sonst waere die Auswahl nach einer
           // Abo-Erneuerung wieder "jeden Tag".
           days: Array.isArray(pc.days) ? pc.days.slice() : []
@@ -1169,7 +1309,7 @@
           await fetch((pc.url || c.url).replace(/\/$/, '') + '/push/sub', {
             method: 'POST',
             headers: { Authorization: auth, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), days: pc.days || [] })
+            body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys, dev: deviceId(), hour: pc.hour, tz: tzHours(), tzMin: tzMinutes(), days: pc.days || [] })
           });
           pc.auth = auth;
         } else if (!pc.auth) {
@@ -1260,6 +1400,7 @@
   /* ---------- App-Badge: offene eigene Aufgaben ---------- */
   function openTasksOfUser(idx) {
     let n = 0;
+    if (!state.currentUser) return 0;      // ohne Person gibt es nichts anzuzeigen
     state.rooms.forEach((r) => {
       dueTasks(r, idx).forEach((t) => {
         // Zaehlt auch Aufgaben, die mir fest zugeteilt sind.
@@ -1413,10 +1554,11 @@
       (list.length ? list.length : 'Danke') + '</button>';
   }
   function roomCard(r, idx, done, onlyMine) {
-    let tasks = dueTasks(r, idx);
+    const alleAufgaben = dueTasks(r, idx);
+    let tasks = alleAufgaben;
     // Im Filter "Meine Aufgaben" zaehlen nur die Aufgaben, die wirklich mir
     // gehoeren - eine fest zugewiesene Aufgabe einer anderen Person nicht.
-    if (onlyMine) tasks = tasks.filter((t) => assigneeForTask(r.id, t, idx) === state.currentUser);
+    if (onlyMine) tasks = alleAufgaben.filter((t) => assigneeForTask(r.id, t, idx) === state.currentUser);
     if (onlyMine && !tasks.length) return '';
     let totalCount = 0, doneCount = 0;
     tasks.forEach((t) => {
@@ -1428,10 +1570,14 @@
     const pct = totalCount ? Math.round((doneCount / totalCount) * 100) : 0;
     const who = member(assigneeFor(r.id, idx));
     const mine = assigneeFor(r.id, idx) === state.currentUser;
-    const later = r.tasks.length - tasks.length;
+    // "N spaeter" = Aufgaben, die in dieser Woche NICHT faellig sind. Das wird
+    // vor dem Filter berechnet, sonst zaehlt der Filter die Aufgaben mit.
+    const later = r.tasks.length - alleAufgaben.length;
     const note = (state.weeks[weekKey(idx)] && state.weeks[weekKey(idx)].notes && state.weeks[weekKey(idx)].notes[r.id]) || '';
 
-    let html = '<section class="card room' + (tasks.length && doneCount === tasks.length ? ' room__done' : '') + '">';
+    // "fertig" nur, wenn ALLE faelligen Eintraege erledigt sind (bei
+    // Tagesaufgaben zaehlt jeder Tag einzeln).
+    let html = '<section class="card room' + (totalCount > 0 && doneCount === totalCount ? ' room__done' : '') + '">';
     html += '<div class="room__head">' +
       '<div class="room__icon" style="background:' + r.color + '22">' + esc(r.icon || '🧽') + '</div>' +
       '<div class="room__meta"><h3>' + esc(r.name) +
@@ -1869,7 +2015,7 @@
       '<div class="field"><label for="sync-url">Server</label><input class="input" id="sync-url" value="' + esc(sc.url) + '" placeholder="' + SYNC_DEFAULT_URL + '"></div>' +
       '<div class="field"><label for="wg-key">WG-Schlüssel</label>' +
       '<div class="row" style="gap:8px;border:0;padding:0">' +
-      '<input class="input" id="sync-key" type="password" value="' + esc(sc.key) + '" placeholder="z. B. XKQ7…" style="flex:1">' +
+      '<input class="input" id="sync-key" type="password" value="" placeholder="' + (sc.key ? 'Schlüssel gesetzt – leer lassen zum Behalten' : 'z. B. XKQ7…') + '" style="flex:1">' +
       '<button class="btn btn--sm" data-action="sync-genkey">Neu</button></div>' +
       '<p class="hint" style="margin-top:6px">Diesen Schlüssel den anderen WG-Mitgliedern geben – wer ihn hat, kommt an den Plan.</p></div>' +
       '<label class="switch"><input type="checkbox" id="sync-enc" ' + (sc.enc ? 'checked' : '') + '><span class="switch__ui"></span>' +
@@ -2270,8 +2416,32 @@
     const out = JSON.parse(JSON.stringify(local));
     // Ist der geteilte Stand neuer, übernimmt er Einstellungen (Zuordnung, Punkte).
     const incomingNewer = (incoming.updatedAt || 0) >= (local.updatedAt || 0);
+    // Loesch-Markierungen: damit Loeschungen zwischen den Geraeten wandern.
+    const localDel = (local.del && typeof local.del === 'object') ? local.del : {};
+    const incomingDel = (incoming.del && typeof incoming.del === 'object') ? incoming.del : {};
+    const outDel = out.del && typeof out.del === 'object' ? out.del : {};
+    ['m', 'r', 't', 'c', 'n', 'a', 'k'].forEach((k) => {
+      if (!outDel[k] || typeof outDel[k] !== 'object') outDel[k] = {};
+    });
+    out.del = outDel;
+    ['m', 'r', 't', 'c', 'n', 'a', 'k'].forEach((k) => {
+      const src = incomingDel[k];
+      if (!src || typeof src !== 'object') return;
+      Object.keys(src).forEach((key) => {
+        const ts = src[key] || 0;
+        if (!outDel[k][key] || ts > outDel[k][key]) outDel[k][key] = ts;
+      });
+    });
+    // Wurde ein Objekt geloescht, wird der eingehende Eintrag uebersprungen.
+    const deleted = (kind, key, entryTs) => {
+      const mark = outDel[kind][key];
+      if (!mark) return false;
+      if (!entryTs) return true;
+      return entryTs <= mark;
+    };
     // Mitglieder
     incoming.members.forEach((m) => {
+      if (deleted('m', m.id, m.updatedAt)) return;
       if (!out.members.find((x) => x.id === m.id)) {
         out.members.push(m);
         out.order.push(m.id);
@@ -2279,6 +2449,7 @@
     });
     // Räume
     incoming.rooms.forEach((r) => {
+      if (deleted('r', r.id, r.updatedAt)) return;
       const ex = out.rooms.find((x) => x.id === r.id);
       if (!ex) { out.rooms.push(r); return; }
       if (incomingNewer) {
@@ -2293,6 +2464,7 @@
         if (ex.mode === 'rotation') ex.fixedMember = null;
       }
       r.tasks.forEach((t) => {
+        if (deleted('t', t.id, t.updatedAt)) return;
         const et = ex.tasks.find((x) => x.id === t.id);
         if (!et) { ex.tasks.push(t); return; }
         if (incomingNewer) {
@@ -2321,13 +2493,28 @@
           Object.keys(src.done[roomId]).forEach(taskId => {
             const a = out.weeks[wk].done[roomId][taskId];
             const b = src.done[roomId][taskId];
-            if (!a || (b.at && a.at && b.at > a.at)) out.weeks[wk].done[roomId][taskId] = b;
+            if (deleted('c', wk + '|' + roomId + '|' + taskId, b && b.at)) return;
+            // Bei Gleichstand entscheidet die Person - stabil, damit sich zwei
+            // Geraete nicht endlos hin- und herschieben.
+            if (!a) { out.weeks[wk].done[roomId][taskId] = b; return; }
+            const at = (b && b.at) || 0, at2 = (a && a.at) || 0;
+            if (at > at2 || (at === at2 && String((b && b.by) || '') > String((a && a.by) || ''))) {
+              out.weeks[wk].done[roomId][taskId] = b;
+            }
           });
         });
       }
       if (src.notes) {
         out.weeks[wk].notes = Object.assign({}, out.weeks[wk].notes || {}, src.notes);
+        if (src.notesAt) out.weeks[wk].notesAt = Object.assign({}, out.weeks[wk].notesAt || {}, src.notesAt);
       }
+      // geloeschte Notizen entfernen
+      Object.keys(out.weeks[wk].notes || {}).forEach((rid) => {
+        const mark = outDel.n[wk + '|' + rid];
+        if (!mark) return;
+        const nts = (out.weeks[wk].notesAt || {})[rid] || 0;
+        if (nts <= mark) delete out.weeks[wk].notes[rid];
+      });
       // Erledigungen taeglicher Aufaben (je Wochentag einer) vereinen
       if (src.days) {
         if (!out.weeks[wk].days) out.weeks[wk].days = {};
@@ -2338,7 +2525,12 @@
             Object.keys(src.days[roomId][taskId]).forEach(day => {
               const a2 = out.weeks[wk].days[roomId][taskId][day];
               const b2 = src.days[roomId][taskId][day];
-              if (!a2 || (b2.at && a2.at && b2.at > a2.at)) out.weeks[wk].days[roomId][taskId][day] = b2;
+              if (deleted('c', wk + '|' + roomId + '|' + taskId + '|' + day, b2 && b2.at)) return;
+              if (!a2) { out.weeks[wk].days[roomId][taskId][day] = b2; return; }
+              const at = (b2 && b2.at) || 0, at2 = (a2 && a2.at) || 0;
+              if (at > at2 || (at === at2 && String((b2 && b2.by) || '') > String((a2 && a2.by) || ''))) {
+                out.weeks[wk].days[roomId][taskId][day] = b2;
+              }
             });
           });
         });
@@ -2354,10 +2546,27 @@
         Object.keys(src).forEach(roomId => {
           if (!out.thanks[wk][roomId]) out.thanks[wk][roomId] = {};
           Object.keys(src[roomId]).forEach(taskId => {
-            const a2 = out.thanks[wk][roomId][taskId] || [];
-            const b2 = Array.isArray(src[roomId][taskId]) ? src[roomId][taskId] : [];
-            const merged = a2.slice();
-            b2.forEach((m) => { if (merged.indexOf(m) === -1) merged.push(m); });
+            const raw = src[roomId][taskId];
+            const b2 = {};
+            if (Array.isArray(raw)) raw.forEach((m) => { b2[m] = 0; });
+            else if (raw && typeof raw === 'object') Object.keys(raw).forEach((m) => { b2[m] = raw[m] || 0; });
+            const rawLocal = out.thanks[wk][roomId][taskId];
+            const a2 = {};
+            if (Array.isArray(rawLocal)) rawLocal.forEach((m) => { a2[m] = 0; });
+            else if (rawLocal && typeof rawLocal === 'object') Object.keys(rawLocal).forEach((m) => { a2[m] = rawLocal[m] || 0; });
+            const merged = Object.assign({}, a2);
+            Object.keys(b2).forEach((m) => {
+              const mark = outDel.k[wk + '|' + roomId + '|' + taskId + '|' + m] || 0;
+              if (mark && mark >= (b2[m] || 0)) { delete merged[m]; return; }
+              if (!(m in merged) || (b2[m] || 0) > (merged[m] || 0)) merged[m] = b2[m] || 0;
+            });
+            Object.keys(outDel.k).forEach((k) => {
+              const parts = k.split('|');
+              if (parts[0] !== wk || parts[1] !== roomId || parts[2] !== taskId) return;
+              const mm = parts[3];
+              const mark = outDel.k[k];
+              if ((merged[mm] || 0) <= mark) delete merged[mm];
+            });
             out.thanks[wk][roomId][taskId] = merged;
           });
         });
@@ -2368,6 +2577,7 @@
       out.absences = Array.isArray(out.absences) ? out.absences : [];
       incoming.absences.forEach(ab => {
         if (!ab || !ab.id) return;
+        if (deleted('a', ab.id, ab.updatedAt)) return;
         const ex = out.absences.find(x => x.id === ab.id);
         if (!ex) { out.absences.push(ab); return; }
         if ((ab.updatedAt || 0) >= (ex.updatedAt || 0)) {
@@ -2440,10 +2650,26 @@
     if (!state.weeks[wk].done) state.weeks[wk].done = {};
     if (!state.weeks[wk].done[roomId]) state.weeks[wk].done[roomId] = {};
     if (day === null || day === undefined || day === '') {
-      if (memberId) state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now() };
-      else delete state.weeks[wk].done[roomId][taskId];
+      if (memberId) {
+        // Den Punktewert mitschreiben: sonst faellt er auf 1 zurueck, wenn der
+        // Raum spaeter geloescht wird und die Historie sonst verfaelscht wird.
+        const t0 = findTask(roomId, taskId);
+        state.weeks[wk].done[roomId][taskId] = { by: memberId, at: Date.now(), p: t0 ? clampPoints(t0.p) : 1 };
+        // Eine Erledigung, die es schon gab, ist keine Loeschung.
+        const mk = wk + '|' + roomId + '|' + taskId;
+        if (state.del && state.del.c) delete state.del.c[mk];
+      } else {
+        delete state.weeks[wk].done[roomId][taskId];
+        // "Als offen markieren" muss auch bei den anderen Geraeten ankommen.
+        markDel('c', wk + '|' + roomId + '|' + taskId);
+      }
     } else {
       setDayEntry(roomId, taskId, day, idx, memberId);
+      const mk = wk + '|' + roomId + '|' + taskId + '|' + day;
+      if (state.del && state.del.c) {
+        if (memberId) delete state.del.c[mk];
+        else markDel('c', mk);
+      }
     }
     save();
     render();
@@ -2457,6 +2683,10 @@
     if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
     const el = ev.target.closest ? ev.target.closest('[data-action="task"]') : null;
     if (!el) return;
+    // Liegt der Fokus auf einem Button INNERHALB der Aufgabe (z. B. "Aufgabe
+    // bearbeiten" oder "Danke"), gehoert die Taste diesem Button - nicht
+    // dem Abhaken der Aufgabe.
+    if (ev.target !== el && el.contains(ev.target)) return;
     ev.preventDefault();
     const dayAttr = (el.dataset.day !== undefined && el.dataset.day !== '') ? parseInt(el.dataset.day, 10) : null;
     toggleTask(el.dataset.room, el.dataset.task, dayAttr);
@@ -2494,6 +2724,7 @@
       case 'abs-add': {
         const sel = $('#abs-member'), from = $('#abs-from'), to = $('#abs-to'), why = $('#abs-reason');
         if (!sel || !from || !to) break;
+        if (!sel.value) { toast('Bitte eine Person wählen'); break; }
         if (!from.value || !to.value) { toast('Bitte Von- und Bis-Datum wählen'); break; }
         if (to.value < from.value) { toast('Das Bis-Datum muss nach dem Von-Datum liegen'); break; }
         state.absences.push({ id: uid('ab'), memberId: sel.value, from: from.value, to: to.value, reason: (why && why.value) || 'sonstiges', updatedAt: Date.now() });
@@ -2504,6 +2735,7 @@
       case 'abs-del': {
         const aid = el.dataset.id;
         state.absences = state.absences.filter((x) => x.id !== aid);
+        markDel('a', aid);   // sonst kommt die Abwesenheit beim Sync zurueck
         save(); render();
         break;
       }
@@ -2675,7 +2907,16 @@
         if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
         if (!state.weeks[wk].notes) state.weeks[wk].notes = {};
         const val = $('#note-text').value.trim();
-        if (val) state.weeks[wk].notes[roomId] = val; else delete state.weeks[wk].notes[roomId];
+        if (val) {
+          state.weeks[wk].notes[roomId] = val;
+          if (!state.weeks[wk].notesAt) state.weeks[wk].notesAt = {};
+          state.weeks[wk].notesAt[roomId] = Date.now();
+          if (state.del && state.del.n) delete state.del.n[wk + '|' + roomId];
+        } else {
+          delete state.weeks[wk].notes[roomId];
+          if (state.weeks[wk].notesAt) delete state.weeks[wk].notesAt[roomId];
+          markDel('n', wk + '|' + roomId);
+        }
         save(); closeSheet(); render(); toast('Notiz gespeichert');
         break;
       }
@@ -2736,8 +2977,19 @@
         if (!confirm('„' + m.name + '“ wirklich entfernen? Die Aufgaben bleiben im Plan, nur die Person nicht mehr.' +
           (festRaeume ? '\n\n' + festRaeume + ' Raum/Räume waren dieser Person fest zugeordnet und wechseln zurück in den Turnus.' : '') +
           (festAufgaben ? '\n\n' + festAufgaben + ' Aufgabe(n) waren dieser Person fest zugeteilt und werden wieder im Turnus erledigt.' : ''))) break;
+        const posInOrder = state.order.indexOf(id);
         state.members = state.members.filter((x) => x.id !== id);
         state.order = state.order.filter((x) => x !== id);
+        markDel('m', id);
+        // Die Versaetze der Raeume anpassen, sonst verschiebt sich die
+        // Zuordnung ALLER Raeume um eine Position.
+        if (posInOrder >= 0) {
+          Object.keys(state.offsets).forEach((rid) => {
+            const off = state.offsets[rid];
+            if (off > posInOrder) state.offsets[rid] = off - 1;
+            else if (off === posInOrder) state.offsets[rid] = 0;
+          });
+        }
         if (state.currentUser === id) state.currentUser = state.members[0] ? state.members[0].id : null;
         // Räume, die nur dieser Person fest zugeordnet waren, wechseln zurück in den Turnus
         let reverted = 0;
@@ -2900,7 +3152,7 @@
         save(); closeSheet(); render();
         break;
       }
-      case 'del-task': {
+      case 'del-task': {   // Loesch-Markierung + Danke-Eintraege aufraeumen
         const r = room(roomId);
         if (!r) break;
         const pos = r.tasks.findIndex((t) => t.id === taskId);
@@ -2923,10 +3175,19 @@
           }
         });
         r.tasks.splice(pos, 1);
+        markDel('t', removed.id);
+        // Danke-Eintraege zur geloeschten Aufgabe entfernen - sonst zaehlt die
+        // Kopfzeile der Fleisswoche weiterhin Dankes fuer eine Aufgabe, die
+        // es nicht mehr gibt.
+        Object.keys(state.thanks || {}).forEach((wk) => {
+          const tw = state.thanks[wk];
+          if (tw && tw[r.id]) delete tw[r.id][taskId];
+        });
         setUndo(() => {
           const rr = room(r.id);
           if (!rr) return;
           rr.tasks.splice(Math.min(pos, rr.tasks.length), 0, removed);
+          if (state.del && state.del.t) delete state.del.t[removed.id];
           Object.keys(hist).forEach((wk) => {
             if (!state.weeks[wk]) state.weeks[wk] = { done: {} };
             if (!state.weeks[wk].done) state.weeks[wk].done = {};
@@ -3014,10 +3275,13 @@
         const weeks = JSON.parse(JSON.stringify(state.weeks));
         state.rooms.splice(pos, 1);
         delete state.offsets[roomId];
+        markDel('r', r.id);
         setUndo(() => {
           state.rooms.splice(Math.min(pos, state.rooms.length), 0, r);
           if (offset !== undefined) state.offsets[roomId] = offset;
           state.weeks = weeks;
+          // Die Loesch-Markierung wieder zuruecknehmen.
+          if (state.del && state.del.r) delete state.del.r[r.id];
           save(); render(); toast('Raum wiederhergestellt');
         });
         save(); closeSheet(); render();
@@ -3057,7 +3321,10 @@
       case 'sync-now': {
         const sc2 = syncCfg();
         sc2.url = ($('#sync-url') || {}).value || SYNC_DEFAULT_URL;
-        sc2.key = (($('#sync-key') || {}).value || '').trim();
+        // Das Feld startet leer (der Schluessel steht nicht im DOM). Nur ein
+        // eigener Eintrag ersetzt den gespeicherten Schluessel.
+        const typedKey = (($('#sync-key') || {}).value || '').trim();
+        if (typedKey) sc2.key = typedKey;
         sc2.enc = !!(($('#sync-enc') || {}).checked);
         save();
         if (!sc2.key) { toast('Kein WG-Schlüssel hinterlegt'); break; }
@@ -3092,11 +3359,14 @@
       case 'share': sheetShare(); break;
       case 'copy-code': {
         const code = ($('#share-code') || {}).value || '';
+        // Solange der Code noch erzeugt wird, gibt es nichts zu kopieren.
+        if (!code || code.indexOf('WGP1.') !== 0) { toast('Der Code wird noch erzeugt – bitte kurz warten'); break; }
         copyText(code);
         break;
       }
       case 'native-share': {
         const code = ($('#share-code') || {}).value || '';
+        if (!code || code.indexOf('WGP1.') !== 0) { toast('Der Code wird noch erzeugt – bitte kurz warten'); break; }
         const link = location.origin + location.pathname + '#s=' + encodeURIComponent(code);
         if (navigator.share) {
           navigator.share({ title: state.wgName + ' – Putzplan', text: 'Hier ist unser WG-Putzplan:\n' + code + '\n\n' + link }).catch(() => {});
@@ -3165,7 +3435,12 @@
     if (!el || !el.id) return;
     const sc = syncCfg();
     if (el.id === 'sync-url') { sc.url = el.value.trim() || SYNC_DEFAULT_URL; save(); }
-    else if (el.id === 'sync-key') { sc.key = el.value.trim(); save(); }
+    else if (el.id === 'sync-key') {
+      const v = el.value.trim();
+      // Leer lassen heisst "behalten" - sonst wuerde das Leeren des Feldes
+      // den gespeicherten Schluessel ungewollt loeschen.
+      if (v) { sc.key = v; save(); }
+    }
     else if (el.id === 'sync-enc') { sc.enc = !!el.checked; save(); }
     else if (el.id === 'sync-on') {
       sc.enabled = !!el.checked;
@@ -3457,6 +3732,8 @@
     weekIndexOf, isoWeek, taskDue, encodeState, decodeState, mergeState, save, render, pointsOf,
     assigneeFor, dueTasks, clampPoints,
     dueDays, freqLabel, normFreq, isDayTask, taskDone, dayEntry, setDayEntry,
-    assigneeForTask, findTask, dueDaysOf: dueDays, weekKey, buildIcs
+    assigneeForTask, findTask, dueDaysOf: dueDays, weekKey, buildIcs,
+    fingerprint, punctualityOverall, punctualityOf, thanksCountFor, thanksTotalFor,
+    openTasksOfUser, updateBadge, weekProgress
   };
 })();
