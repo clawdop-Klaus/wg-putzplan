@@ -22,6 +22,7 @@
 <body>
 
 <div class="app">
+  <a class="skiplink" href="#main">Zum Inhalt springen</a>
   <header class="appbar" id="appbar">
     <div class="appbar__top">
       <div class="appbar__title">
@@ -63,7 +64,9 @@
   </div>
 </div>
 
-<div class="toast" id="toast" hidden></div>
+<!-- Live-Region: Rueckmeldungen werden vorgelesen, auch wenn sie nur kurz
+     sichtbar sind. -->
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
 <script src="./qr.js"></script>
 <script src="./app.js"></script>

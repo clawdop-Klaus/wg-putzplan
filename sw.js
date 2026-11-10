@@ -1,5 +1,5 @@
 /* WG-Putzplan – Service Worker (Offline-Fähigkeit) */
-const CACHE = 'wg-putzplan-v10';
+const CACHE = 'wg-putzplan-v11';
 const PUSH_CACHE = 'wg-putzplan-push';
 const ASSETS = [
   './',
@@ -20,10 +20,9 @@ const ASSETS = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => c.addAll(ASSETS))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
-  );
+      .then((c) => c.addAll(ASSETS))   // Fehler nicht verschlucken: sonst ist
+      .then(() => self.skipWaiting())   // der Cache unvollstaendig und die
+  );                                  // Offline-Faehigkeit geht lautlos verloren
 });
 
 self.addEventListener('activate', (e) => {
@@ -129,7 +128,8 @@ self.addEventListener('pushsubscriptionchange', (e) => {
           headers: { Authorization: cred.auth, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             endpoint: j.endpoint, keys: j.keys,
-            dev: cred.dev, hour: cred.hour, tz: cred.tz
+            dev: cred.dev, hour: cred.hour, tz: cred.tz,
+            days: Array.isArray(cred.days) ? cred.days : []
           })
         });
       }
@@ -152,6 +152,14 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
+  // Navigation auf den Bereich ohne Schraegstrich (z. B. "/wg-putzplan"):
+  // GitHub Pages antwortet mit 301 - offline nicht aufloesbar. Deshalb
+  // selbst auf die App-URL umleiten.
+  const scopeRoot = new URL('./', self.location.href).pathname.replace(/\/$/, '');
+  if (scopeRoot && url.pathname === scopeRoot && req.mode === 'navigate') {
+    e.respondWith(fetch(req).catch(() => caches.match('./index.html')));
+    return;
+  }
   if (ASSET_PATHS.indexOf(url.pathname) === -1) return;
 
   e.respondWith(

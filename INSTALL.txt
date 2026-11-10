@@ -40,7 +40,9 @@ Schritt 3 – Bestätigen
     Fertig. Auf dem Homeschirm liegt jetzt das Symbol "Putzplan".
 
 Schritt 4 – Erste Schritte in der App
-    a) Tippe auf das Symbol. Die App startet in der Browseransicht.
+    a) Tippe auf das Symbol. Die App startet - wie eine installierte App
+       ohne Browserleiste (die Browseransicht ist nur der Fallback, falls
+       du die App nicht installierst).
     b) Unter "Mehr" findest du die Karte "Als App installieren" – dort kannst
        du die Installation auch noch mal anstoßen, falls du sie übersprungen
        hast.
@@ -52,8 +54,9 @@ So prüfst du, ob es geklappt hat: Öffne die App, gehe in den Browser, tippe
 auf die drei Punkte und schau, ob dort "App deinstallieren" steht. Steht da
 "App installieren", ist sie noch nicht installiert.
 
-Hinweis zu Benachrichtigungen: Chrome fragt beim ersten Mal, ob die App
-Benachrichtigungen senden darf. Erlaubst du das, bekommst du später eine
+Hinweis zu Benachrichtigungen: Die Erlaubnis fragt die App erst ab, wenn du
+unter "Mehr" -> "Erinnerungen" auf "Aktivieren" tippt (der Browser zeigt dann
+ein Fenster zum Erlauben). Erlaubst du das, bekommst du später eine
 kurze Nachricht, wenn sich der Plan ändert oder deine Erinnerungszeit ist.
 Die Meldung enthält bewusst keine Details – nur "Der Putzplan wurde
 geändert". Du musst in der App unter "Mehr" -> "Erinnerungen" auf
@@ -208,7 +211,7 @@ sieht den Plan wieder.
 
 
 ================================================================================
-6. AUFGABEN ANLEGEN: WIE OFT UND WER
+7. AUFGABEN ANLEGEN: WIE OFT UND WER
 ================================================================================
 
 Unter "Turnus" -> "Räume" -> Raum antippen -> "+ Aufgabe in <Raum>".

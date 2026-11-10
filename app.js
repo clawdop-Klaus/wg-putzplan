@@ -19,7 +19,7 @@
   // Cache der Aufgaben (fuer schnelle Punkte-/Statistik-Berechnung).
   // Muss VOR state = load() deklariert sein: save() greift darauf zu.
   let taskIndexCache = null;
-  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null, weekFilter: 'all' };
+  let ui = { view: 'week', weekOffset: 0, planTab: 'weeks', weekIndex: null, lastView: null, weekFilter: 'all', thanksOffset: 0 };
   let installPrompt = null;
   let toastTimer = null;
 
@@ -1112,7 +1112,10 @@
           auth: await pushAuth(),
           dev: deviceId(),
           hour: pc.hour,
-          tz: tzHours()
+          tz: tzHours(),
+          // Wochentage mitgeben: sonst waere die Auswahl nach einer
+          // Abo-Erneuerung wieder "jeden Tag".
+          days: Array.isArray(pc.days) ? pc.days.slice() : []
         }
       });
     } catch (e) { /* egal */ }
@@ -1451,8 +1454,13 @@
         const e = taskDone(r.id, t, d, idx);
         const by = e ? member(e.by) : null;
         const fl = freqLabel(t);
+        // role=checkbox + tabindex: die Aufgabe ist auch per Tastatur
+        // abhakbar (Enter oder Leertaste), nicht nur mit dem Finger.
+        const taskLabel = (isDayTask(t) ? DAY_NAMES[d] + ': ' : '') + t.title +
+          ' – ' + r.name + (e ? ', erledigt' : ', offen');
         html += '<div class="task' + (e ? ' is-done' : '') + '" data-action="task" data-room="' + r.id + '" data-task="' + t.id + '"' +
-          (isDayTask(t) ? ' data-day="' + d + '"' : '') + '>' +
+          (isDayTask(t) ? ' data-day="' + d + '"' : '') +
+          ' role="checkbox" tabindex="0" aria-checked="' + (e ? 'true' : 'false') + '" aria-label="' + esc(taskLabel) + '">' +
           '<div class="task__box">✓</div>' +
           '<div class="task__label">' + (isDayTask(t) ? '<span class="task__day">' + DAY_NAMES[d] + '</span> ' : '') + esc(t.title) +
           (fl !== 'wöchentlich' ? '<div class="task__meta">' + esc(fl) + '</div>' : '') +
@@ -1713,15 +1721,24 @@
     html += '</div>';
 
     // ---- Fleißwoche: Bestätigungen und Pünktlichkeit, bewusst ohne Rangliste ----
-    const pun = punctualityOf(idx);
-    const totalThanks = thanksTotalFor(idx);
-    html += '<div class="card"><div class="card__head"><h3>Fleißwoche</h3><span class="card__sub">' + weekLabel(idx) + '</span></div>';
+    // Eigene Wochenwahl: die Wochen-Navigation der Wochenansicht ist im
+    // Statistik-Tab nicht sichtbar - ohne diesen Umschalter waeren die
+    // Bestätigungen der Vorwochen unerreichbar.
+    const twIdx = weekIndexOf(new Date()) + ui.thanksOffset;
+    const pun = punctualityOf(twIdx);
+    const totalThanks = thanksTotalFor(twIdx);
+    html += '<div class="card"><div class="card__head"><h3>Fleißwoche</h3>' +
+      '<span class="card__sub">' + weekLabel(twIdx) + '</span></div>' +
+      '<div class="row" style="gap:8px;margin-bottom:8px">' +
+      '<button class="btn btn--sm" data-action="thanks-prev" aria-label="Vorherige Woche">‹</button>' +
+      '<button class="btn btn--sm" data-action="thanks-now">' + (ui.thanksOffset === 0 ? 'Diese Woche' : 'Zurück zur aktuellen Woche') + '</button>' +
+      '<button class="btn btn--sm" data-action="thanks-next" aria-label="Nächste Woche"' + (ui.thanksOffset >= 0 ? ' disabled' : '') + '>›</button></div>';
     html += '<p class="hint">Bestätigungen sind ein Dank für erledigte Aufgaben – kein Rang, keine Punkte, kein Geld. Die Auswertung bleibt nur auf diesem Gerät.</p>';
     const named = state.members.slice().sort((a2, b2) => String(a2.name).localeCompare(String(b2.name), 'de'));
     named.forEach((m) => {
-      const t = thanksCountFor(m.id, idx);
+      const t = thanksCountFor(m.id, twIdx);
       const pu = pun[m.id] || { punctual: 0, late: 0 };
-      const ab = absenceFor(m.id, idx);
+      const ab = absenceFor(m.id, twIdx);
       html += '<div style="display:flex;gap:9px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">' +
         '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' +
         '<span style="flex:1;min-width:0"><strong style="font-size:14px">' + esc(m.name) + '</strong>' +
@@ -1730,7 +1747,11 @@
         (ab ? '<span class="pill">' + esc(ABSENCE_REASON[ab.reason] || 'abwesend') + '</span>' : '') +
         '</div>';
     });
-    html += '<p class="hint" style="margin-top:10px">Diese Woche wurden ' + plural(totalThanks, 'Aufgabe', 'Aufgaben') + ' bedankt.</p></div>';
+    html += '<p class="hint" style="margin-top:10px">Diese Woche wurden ' + plural(totalThanks, 'Aufgabe', 'Aufgaben') + ' bedankt.</p>' +
+      '<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">' +
+      '<button class="btn btn--sm" data-action="thanks-all">🤝 Alle erledigten Aufgaben bestätigen</button>' +
+      '<button class="btn btn--sm" data-action="week-summary">📋 Wochenzusammenfassung kopieren</button>' +
+      '</div></div>';
 
     // ---- Pünktlichkeit über die gesamte Zeit ----
     const po = punctualityOverall();
@@ -1831,7 +1852,7 @@
   /* ---------- Mehr ---------- */
   function viewMore() {
     let html = '<div class="card"><div class="card__head"><h3>WG</h3></div>' +
-      '<div class="field"><label>Name der WG</label><input class="input" id="wgname" value="' + esc(state.wgName) + '" placeholder="z. B. Sonnenblumen WG"></div>' +
+      '<div class="field"><label for="wgname">Name der WG</label><input class="input" id="wgname" value="' + esc(state.wgName) + '" placeholder="z. B. Sonnenblumen WG"></div>' +
       '<button class="btn btn--primary btn--block" data-action="save-name">Namen speichern</button></div>';
 
     html += '<div class="card"><div class="card__head"><h3>Erscheinungsbild</h3></div><div class="segmented">' +
@@ -1845,8 +1866,8 @@
       (sc.status === 'ok' ? 'verbunden' : (sc.status === 'fehler' ? 'Fehler' : 'aus')) + '</span></div>' +
       '<p class="hint" style="margin:-2px 0 12px">Alle Geräte der WG teilen sich dann denselben Stand automatisch – ohne Code kopieren. ' +
       'Der WG-Schlüssel bleibt nur auf den Geräten; gespeichert wird verschlüsselt.</p>' +
-      '<div class="field"><label>Server</label><input class="input" id="sync-url" value="' + esc(sc.url) + '" placeholder="' + SYNC_DEFAULT_URL + '"></div>' +
-      '<div class="field"><label>WG-Schlüssel</label>' +
+      '<div class="field"><label for="sync-url">Server</label><input class="input" id="sync-url" value="' + esc(sc.url) + '" placeholder="' + SYNC_DEFAULT_URL + '"></div>' +
+      '<div class="field"><label for="wg-key">WG-Schlüssel</label>' +
       '<div class="row" style="gap:8px;border:0;padding:0">' +
       '<input class="input" id="sync-key" type="password" value="' + esc(sc.key) + '" placeholder="z. B. XKQ7…" style="flex:1">' +
       '<button class="btn btn--sm" data-action="sync-genkey">Neu</button></div>' +
@@ -1889,11 +1910,11 @@
           ? '<button class="btn" data-action="push-off" style="flex:1">Ausschalten</button>'
           : '<button class="btn btn--primary" data-action="push-on" style="flex:1">Aktivieren</button>') +
         '<button class="btn" data-action="push-test" style="flex:1">Testnachricht</button></div>';
-      pushHtml += '<div class="field" style="margin-top:12px"><label>Tägliche Erinnerung</label>' +
+      pushHtml += '<div class="field" style="margin-top:12px"><label for="push-hour">Tägliche Erinnerung</label>' +
         '<select class="input" id="push-hour">' +
         PUSH_HOURS.map(function (h) { return '<option value="' + h.v + '"' + (pc.hour === h.v ? ' selected' : '') + '>' + h.t + '</option>'; }).join('') +
         '</select><p class="hint" style="margin-top:6px">Eine Erinnerung am Tag reicht meistens – wer putzt, sieht sie ohnehin im Plan.</p></div>';
-      pushHtml += '<div class="field" style="margin-top:12px"><label>An welchen Tagen</label><div class="daypick">' +
+      pushHtml += '<div class="field" style="margin-top:12px"><label id="lbl-push-days">An welchen Tagen</label><div class="daypick" role="group" aria-labelledby="lbl-push-days">' +
         PUSH_DAYS.map(function (d) {
           const on = (pc.days || []).indexOf(d.v) !== -1;
           return '<button type="button" class="daypick__day' + (on ? ' is-on' : '') + '" data-action="push-day" data-day="' + d.v + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + d.t + '</button>';
@@ -1906,13 +1927,13 @@
     // ---- Abwesenheiten (Urlaub / Krankheit pausieren Punkte) ----
     html += '<div class="card"><div class="card__head"><h3>Abwesenheiten</h3></div>' +
       '<p class="hint">Im Urlaub oder krank? Dann zählen die Punkte dieser Zeit nicht – sonst sieht die Fairness falsch aus und jede Belohnung wäre verzerrt.</p>' +
-      '<div class="field"><label>Wer</label><select class="input" id="abs-member">' +
+      '<div class="field"><label for="abs-member">Wer</label><select class="input" id="abs-member">' +
       state.members.map((m) => '<option value="' + m.id + '">' + esc(m.emoji + ' ' + m.name) + '</option>').join('') +
       '</select></div>' +
       '<div class="row" style="gap:8px;border:0;padding:0">' +
-      '<div class="field" style="flex:1;margin:0"><label>Von</label><input class="input" type="date" id="abs-from"></div>' +
-      '<div class="field" style="flex:1;margin:0"><label>Bis</label><input class="input" type="date" id="abs-to"></div></div>' +
-      '<div class="field" style="margin-top:10px"><label>Grund</label><select class="input" id="abs-reason">' +
+      '<div class="field" style="flex:1;margin:0"><label for="abs-from">Von</label><input class="input" type="date" id="abs-from"></div>' +
+      '<div class="field" style="flex:1;margin:0"><label for="abs-to">Bis</label><input class="input" type="date" id="abs-to"></div></div>' +
+      '<div class="field" style="margin-top:10px"><label for="abs-reason">Grund</label><select class="input" id="abs-reason">' +
       Object.keys(ABSENCE_REASON).map((k) => '<option value="' + k + '">' + ABSENCE_REASON[k] + '</option>').join('') +
       '</select></div>' +
       '<button class="btn btn--primary btn--block" data-action="abs-add">Abwesenheit eintragen</button>';
@@ -1970,16 +1991,31 @@
   /* =========================================================
      Sheets (Bottom-Sheets)
      ========================================================= */
+  let sheetReturnFocus = null;
   function openSheet(title, bodyHtml, actionsHtml) {
     $('#sheet-title').textContent = title;
     $('#sheet-body').innerHTML = bodyHtml;
     $('#sheet-actions').innerHTML = actionsHtml || '<button class="btn" data-action="close-sheet">Schließen</button>';
+    // Woher kam der Fokus? Beim Schliessen wird er dorthin zurueckgegeben.
+    sheetReturnFocus = document.activeElement;
     $('#sheet').hidden = false;
     document.body.style.overflow = 'hidden';
+    // Den Fokus in den Dialog setzen - sonst bleibt er im Hintergrund und
+    // Tastatur-/Screenreader-Nutzung bleibt hinter dem Fenster.
+    try {
+      const panel = document.querySelector('#sheet .sheet__panel');
+      const first = $('#sheet-body input, #sheet-body select, #sheet-body button, #sheet-body textarea, #sheet-actions button');
+      if (first) first.focus();
+      else if (panel) { panel.setAttribute('tabindex', '-1'); panel.focus(); }
+    } catch (e) { /* egal */ }
   }
   function closeSheet() {
     $('#sheet').hidden = true;
     document.body.style.overflow = '';
+    try {
+      if (sheetReturnFocus && document.contains(sheetReturnFocus)) sheetReturnFocus.focus();
+    } catch (e) { /* egal */ }
+    sheetReturnFocus = null;
   }
 
   /* ---------- Person wählen ---------- */
@@ -2000,11 +2036,11 @@
     const m = member(id);
     if (!m) return;
     const body =
-      '<div class="field"><label>Name</label><input class="input" id="m-name" value="' + esc(m.name) + '"></div>' +
-      '<div class="field"><label>Symbol</label><div id="m-emoji">' +
+      '<div class="field"><label for="m-name">Name</label><input class="input" id="m-name" value="' + esc(m.name) + '"></div>' +
+      '<div class="field"><label id="lbl-m-emoji">Symbol</label><div id="m-emoji" role="group" aria-labelledby="lbl-m-emoji">' +
       EMOJIS.map((e) => '<button class="chip' + (e === m.emoji ? ' chip--active' : '') + '" data-action="pick-emoji" data-emoji="' + e + '" style="font-size:19px">' + e + '</button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Farbe</label><div id="m-color">' +
+      '<div class="field"><label id="lbl-m-color">Farbe</label><div id="m-color" role="group" aria-labelledby="lbl-m-color">' +
       MEMBER_COLORS.map((c) => '<button class="chip' + (c === m.color ? ' chip--active' : '') + '" data-action="pick-color" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (c === m.color ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>';
     openSheet('Person bearbeiten', body,
@@ -2014,11 +2050,11 @@
 
   function sheetAddMember() {
     const body =
-      '<div class="field"><label>Name</label><input class="input" id="m-name" placeholder="z. B. Alex"></div>' +
-      '<div class="field"><label>Symbol</label><div id="m-emoji">' +
+      '<div class="field"><label for="m-name">Name</label><input class="input" id="m-name" placeholder="z. B. Alex"></div>' +
+      '<div class="field"><label>Symbol</label><div id="m-emoji" role="group" aria-label="Symbol">' +
       EMOJIS.map((e) => '<button class="chip' + (e === EMOJIS[0] ? ' chip--active' : '') + '" data-action="pick-emoji" data-emoji="' + e + '" style="font-size:19px">' + e + '</button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Farbe</label><div id="m-color">' +
+      '<div class="field"><label>Farbe</label><div id="m-color" role="group" aria-label="Farbe">' +
       MEMBER_COLORS.map((c, i) => '<button class="chip' + (i === state.members.length % MEMBER_COLORS.length ? ' chip--active' : '') + '" data-action="pick-color" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (i === state.members.length % MEMBER_COLORS.length ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>';
     openSheet('Neue Person', body,
@@ -2033,11 +2069,11 @@
     const fixed = !!(r && r.mode === 'fixed');
     const cur = r ? r.fixedMember : null;
     let html =
-      '<div class="field"><label>Zuordnung</label><div class="segmented" id="r-mode">' +
+      '<div class="field"><label id="lbl-r-mode">Zuordnung</label><div class="segmented" id="r-mode" role="group" aria-labelledby="lbl-r-mode">' +
       '<button data-action="pick-mode" data-room="' + (roomId || '') + '" data-mode="rotation" class="' + (!fixed ? 'is-active' : '') + '">Wechselnd</button>' +
       '<button data-action="pick-mode" data-room="' + (roomId || '') + '" data-mode="fixed" class="' + (fixed ? 'is-active' : '') + '">Fest</button>' +
       '</div></div>';
-    html += '<div class="field" id="fixedwrap"' + (fixed ? '' : ' style="display:none"') + '><label>Feste Person</label><div id="r-fixed">';
+    html += '<div class="field" id="fixedwrap"' + (fixed ? '' : ' style="display:none"') + '><label id="lbl-r-fixed">Feste Person</label><div id="r-fixed" role="group" aria-labelledby="lbl-r-fixed">';
     html += state.members.map((m) => '<button class="chip' + (cur === m.id ? ' chip--active' : '') + '" data-action="pick-fixed" data-member="' + m.id + '">' +
       '<span class="chip-avatar chip-avatar--sm" style="background:' + m.color + '">' + m.emoji + '</span>' + esc(m.name) + '</button>').join('');
     html += '</div><p class="hint" style="margin-top:6px">Diese Person ist dauerhaft fuer den Raum zustaendig – unabhaengig vom Turnus.</p></div>';
@@ -2049,9 +2085,9 @@
     const r = room(id);
     if (!r) return;
     let body =
-      '<div class="field"><label>Name des Raums</label><input class="input" id="r-name" value="' + esc(r.name) + '"></div>' +
-      '<div class="field"><label>Symbol (Emoji)</label><input class="input" id="r-icon" value="' + esc(r.icon || '') + '" maxlength="4"></div>' +
-      '<div class="field"><label>Farbe</label><div id="r-color">' +
+      '<div class="field"><label for="r-name">Name des Raums</label><input class="input" id="r-name" value="' + esc(r.name) + '"></div>' +
+      '<div class="field"><label for="r-icon">Symbol (Emoji)</label><input class="input" id="r-icon" value="' + esc(r.icon || '') + '" maxlength="4"></div>' +
+      '<div class="field"><label id="lbl-r-color">Farbe</label><div id="r-color" role="group" aria-labelledby="lbl-r-color">' +
       MEMBER_COLORS.map((c) => '<button class="chip' + (c === r.color ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (c === r.color ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
       roomModeFields(r, r.id);
@@ -2076,27 +2112,27 @@
     const curEvery = t ? Math.max(1, Number(t.every) || 1) : 1;
 
     let body =
-      '<div class="field"><label>Raum</label><select class="input" id="t-room">' +
+      '<div class="field"><label for="t-room">Raum</label><select class="input" id="t-room">' +
       state.rooms.map((r) => '<option value="' + r.id + '"' + (r.id === curRoom.id ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
       '</select></div>' +
-      '<div class="field"><label>Was ist zu tun?</label><input class="input" id="t-title" placeholder="z. B. Geschirr abwaschen" value="' + (t ? esc(t.title) : '') + '"></div>' +
-      '<div class="field"><label>Wie oft?</label>' +
+      '<div class="field"><label for="t-title">Was ist zu tun?</label><input class="input" id="t-title" placeholder="z. B. Geschirr abwaschen" value="' + (t ? esc(t.title) : '') + '"></div>' +
+      '<div class="field"><label for="t-every">Wie oft?</label>' +
       '<div class="row" style="gap:8px;border:0;padding:0">' +
       '<input class="input" type="number" id="t-every" min="1" max="' + FREQ_MAX[curFreq] + '" value="' + curEvery + '" style="flex:0 0 84px" aria-label="Intervall">' +
       '<select class="input" id="t-unit" style="flex:1" aria-label="Einheit">' +
       Object.keys(FREQ_UNITS).map((u) => '<option value="' + u + '"' + (curFreq === u ? ' selected' : '') + '>' + FREQ_UNITS[u] + '</option>').join('') +
       '</select></div>' +
       '<p class="hint" id="t-freqhint" style="margin-top:6px">' + esc(freqLabel({ freq: curFreq, every: curEvery })) + '</p></div>' +
-      '<div class="field"><label>Zuständig</label><select class="input" id="t-assign">' +
+      '<div class="field"><label for="t-assign">Zuständig</label><select class="input" id="t-assign">' +
       '<option value="">wie der Raum (Turnus)</option>' +
       state.members.map((m) => '<option value="' + m.id + '"' + (t && t.assign === m.id ? ' selected' : '') + '>' + esc(m.emoji + ' ' + m.name) + '</option>').join('') +
       '</select><p class="hint" style="margin-top:6px">Standard: wer in dieser Woche den Raum hat. Fest: immer dieselbe Person – unabhängig vom Turnus.</p></div>' +
-      '<div class="field"><label>Punkte</label><div class="points" id="t-points">' +
+      '<div class="field"><label id="lbl-t-points">Punkte</label><div class="points" id="t-points" role="group" aria-labelledby="lbl-t-points">' +
       [1, 2, 3, 4].map((p) => '<button class="points__btn' + (p === curPts ? ' is-active' : '') + '" data-action="pick-points" data-p="' + p + '">' +
         '<strong>' + p + '</strong><span>P</span></button>').join('') +
       '</div><p class="hint" style="margin-top:6px">Wie viel die Aufgabe wert ist – z. B. 1 Punkt für Geschirr, 4 Punkte für Bad putzen.</p></div>';
     if (editing) {
-      body += '<div class="field"><label>Erledigt in der Historie</label><p class="hint">Bereits erledigte Einträge bleiben bestehen – auch wenn du die Aufgabe änderst oder in einen anderen Raum verschiebst.</p></div>';
+      body += '<div class="field"><p class="hint"><strong>Erledigt in der Historie:</strong> Bereits erledigte Einträge bleiben bestehen – auch wenn du die Aufgabe änderst oder in einen anderen Raum verschiebst.</p></div>';
     }
     openSheet(editing ? 'Aufgabe bearbeiten' : 'Aufgabe erstellen', body,
       '<button class="btn btn--primary" data-action="save-task" data-task="' + (t ? t.id : '') + '" data-room="' + curRoom.id + '">' +
@@ -2107,12 +2143,12 @@
 
   function sheetAddRoom() {
     const body =
-      '<div class="field"><label>Name des Raums</label><input class="input" id="r-name" placeholder="z. B. Flur"></div>' +
-      '<div class="field"><label>Symbol (Emoji)</label><input class="input" id="r-icon" value="🧽" maxlength="4"></div>' +
-      '<div class="field"><label>Farbe</label><div id="r-color">' +
+      '<div class="field"><label for="r-name">Name des Raums</label><input class="input" id="r-name" placeholder="z. B. Flur"></div>' +
+      '<div class="field"><label for="r-icon">Symbol (Emoji)</label><input class="input" id="r-icon" value="🧽" maxlength="4"></div>' +
+      '<div class="field"><label>Farbe</label><div id="r-color" role="group" aria-label="Farbe">' +
       MEMBER_COLORS.map((c, i) => '<button class="chip' + (i === 0 ? ' chip--active' : '') + '" data-action="pick-rcolor" data-color="' + c + '" style="background:' + c + ';width:32px;height:32px;padding:0;border-radius:50%;border:2px solid ' + (i === 0 ? 'var(--text)' : 'transparent') + '"></button>').join('') +
       '</div></div>' +
-      '<div class="field"><label>Erste Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>' +
+      '<div class="field"><label for="r-task-title">Erste Aufgabe (optional)</label><input class="input" id="r-task-title" placeholder="z. B. Staubsaugen"></div>' +
       roomModeFields({ mode: 'rotation', fixedMember: null }, '');
     openSheet('Neuer Raum', body,
       '<button class="btn" data-action="save-room" data-new="1">Anlegen</button>' +
@@ -2158,6 +2194,10 @@
 
   function slimState() {
     const s = JSON.parse(JSON.stringify(state));
+    // WICHTIG: Der WG-Schluessel (Zugang zum Live-Sync) darf NICHT im
+    // geteilten Code stehen - sonst kaeme jeder, der den Code sieht, in
+    // den Plan. Fuers Backup gibt es die eigene Schluessel-Datei.
+    delete s.sync;
     // ältere Wochen wegtrimmen, damit der Code kurz bleibt
     const base = weekIndexOf(new Date());
     Object.keys(s.weeks).forEach((k) => {
@@ -2245,7 +2285,11 @@
         // Feste oder wechselnde Zuordnung mit übernehmen
         ex.mode = r.mode === 'fixed' ? 'fixed' : 'rotation';
         ex.fixedMember = r.mode === 'fixed' ? (r.fixedMember || null) : null;
-        if (ex.mode === 'fixed' && !member(ex.fixedMember)) ex.mode = 'rotation';
+        // Wichtig: gegen die MERGE-Liste prüfen, nicht gegen den alten
+        // Bildschirmstand. Die feste Person kann gerade neu hinzugekommen
+        // sein - sonst ging die Zuordnung beim ersten Sync verloren.
+        const known = out.members.some((m) => m.id === ex.fixedMember);
+        if (ex.mode === 'fixed' && !known) ex.mode = 'rotation';
         if (ex.mode === 'rotation') ex.fixedMember = null;
       }
       r.tasks.forEach((t) => {
@@ -2408,6 +2452,16 @@
   /* =========================================================
      Event-Handling
      ========================================================= */
+  // Tastaturbedienung: Enter und Leertaste auf einer Aufgabe haaken sie ab.
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
+    const el = ev.target.closest ? ev.target.closest('[data-action="task"]') : null;
+    if (!el) return;
+    ev.preventDefault();
+    const dayAttr = (el.dataset.day !== undefined && el.dataset.day !== '') ? parseInt(el.dataset.day, 10) : null;
+    toggleTask(el.dataset.room, el.dataset.task, dayAttr);
+  });
+
   document.addEventListener('click', async function (ev) {
     const tab = ev.target.closest('.tab');
     if (tab) {
@@ -2451,6 +2505,91 @@
         const aid = el.dataset.id;
         state.absences = state.absences.filter((x) => x.id !== aid);
         save(); render();
+        break;
+      }
+      case 'thanks-prev': {
+        // hoechstens 52 Wochen zurueck
+        ui.thanksOffset = Math.max(-52, ui.thanksOffset - 1);
+        render();
+        break;
+      }
+      case 'thanks-next': {
+        ui.thanksOffset = Math.min(0, ui.thanksOffset + 1);
+        render();
+        break;
+      }
+      case 'thanks-now': {
+        ui.thanksOffset = 0;
+        render();
+        break;
+      }
+      case 'thanks-all': {
+        // Alle in dieser Woche von anderen erledigten Aufgaben bestaetigen.
+        const idx = weekIndexOf(new Date()) + ui.thanksOffset;
+        const wk = state.weeks[weekKey(idx)];
+        if (!wk || !wk.done) { toast('Diese Woche wurde noch nichts erledigt'); break; }
+        let n = 0;
+        Object.keys(wk.done).forEach((roomId) => {
+          Object.keys(wk.done[roomId]).forEach((taskId) => {
+            const e = wk.done[roomId][taskId];
+            if (!e || !e.by || e.by === state.currentUser) return;
+            const list = thanksList(roomId, taskId, idx);
+            if (list.indexOf(state.currentUser) === -1) {
+              toggleThanks(roomId, taskId, idx, state.currentUser);
+              n++;
+            }
+          });
+        });
+        // Erledigungen taeglicher Aufaben zaehlen getrennt (eigener Schluessel).
+        const wkDays = (state.weeks[weekKey(idx)] || {}).days || {};
+        Object.keys(wkDays).forEach((roomId) => {
+          Object.keys(wkDays[roomId]).forEach((taskId) => {
+            Object.keys(wkDays[roomId][taskId]).forEach((day) => {
+              const e = wkDays[roomId][taskId][day];
+              if (!e || !e.by || e.by === state.currentUser) return;
+              const key = thanksKey(taskId, parseInt(day, 10));
+              const list = thanksList(roomId, key, idx);
+              if (list.indexOf(state.currentUser) === -1) {
+                toggleThanks(roomId, key, idx, state.currentUser);
+                n++;
+              }
+            });
+          });
+        });
+        save(); render();
+        toast(n ? plural(n, 'Aufgabe bestätigt', 'Aufgaben bestätigt') + ' ✓' : 'Alles ist schon bestätigt');
+        break;
+      }
+      case 'week-summary': {
+        const idx = weekIndexOf(new Date()) + ui.thanksOffset;
+        const pun = punctualityOf(idx);
+        let punctual = 0, late = 0;
+        state.members.forEach((m) => {
+          const p = pun[m.id] || { punctual: 0, late: 0 };
+          punctual += p.punctual; late += p.late;
+        });
+        const lines = [];
+        lines.push((state.wgName || 'WG-Putzplan') + ' – ' + weekLabel(idx) + ' (' + weekRange(idx) + ')');
+        const prog = weekProgress(idx);
+        lines.push(prog.total + ' Aufgaben, ' + prog.done + ' erledigt');
+        const pts = weekPointTotal(idx);
+        if (pts) lines.push(pts + ' Punkte verteilt');
+        lines.push(punctual + ' pünktlich' + (late ? ', ' + late + ' nachgetragen' : ''));
+        const th = thanksTotalFor(idx);
+        if (th) lines.push(th + ' Bestätigungen');
+        const ab = state.absences.filter((a) => absenceOverlaps(a, weekStart(idx), new Date(weekStart(idx).getFullYear(), weekStart(idx).getMonth(), weekStart(idx).getDate() + 6)));
+        if (ab.length) {
+          lines.push('Abwesend: ' + ab.map((a) => {
+            const mm = member(a.memberId);
+            return (mm ? mm.name : '?') + ' (' + (ABSENCE_REASON[a.reason] || 'abwesend') + ')';
+          }).join(', '));
+        }
+        const text = lines.join('\n');
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => toast('Zusammenfassung kopiert ✓')).catch(() => fallbackCopy(text));
+          } else fallbackCopy(text);
+        } catch (e) { fallbackCopy(text); }
         break;
       }
       case 'push-day': {
@@ -2990,7 +3129,11 @@
         const inc = window.__incoming;
         if (!inc) { toast('Erst den Code prüfen'); break; }
         if (el.dataset.mode === 'replace') {
+          // Die Zugangsdaten zum Live-Sync gehoeren zum Geraet, nicht zum
+          // Plan - sonst wuerde ein geteilter Code den Sync-Zugang loeschen.
+          const keepSync = state.sync;
           state = inc;
+          if (keepSync && !state.sync) state.sync = keepSync;
         } else {
           state = mergeState(state, inc);
         }
@@ -3125,9 +3268,12 @@
   }
 
   function exportFile() {
+    // Die Datei wird weitergegeben - also ohne WG-Schluessel.
+    const out = JSON.parse(JSON.stringify(state));
+    delete out.sync;
     downloadFile((state.wgName || 'wg-putzplan').replace(/[^\w\-äöüÄÖÜß ]/g, '').replace(/\s+/g, '-') + '.json',
-      JSON.stringify(state, null, 2), 'application/json');
-    toast('Datei gespeichert ✓');
+      JSON.stringify(out, null, 2), 'application/json');
+    toast('Datei gespeichert ✓ (ohne WG-Schlüssel)');
   }
 
   function importFile() {
@@ -3239,6 +3385,12 @@
   });
 
   /* ---------- Start ---------- */
+  // Startansicht aus der Adresse uebernehmen (Shortcut der installierten App:
+  // "./?view=week" oder "?view=stats").
+  try {
+    const v = new URLSearchParams(location.search).get('view');
+    if (v && ['week', 'plan', 'stats', 'more', 'print'].indexOf(v) !== -1) ui.view = v;
+  } catch (e) { /* egal */ }
   render();
   applyHashCode();
   applyInviteLink();

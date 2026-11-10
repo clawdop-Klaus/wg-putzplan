@@ -1,7 +1,8 @@
 # WG-Putzplan
 
 Eine Putzplan-App für WGs, die auf **iPhone/iPad (Safari)** und **Android (Chrome)** läuft.
-Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
+Kein Konto, offlinefähig – die Daten liegen auf dem Gerät. Ein Live-Sync mit
+Cloudflare ist **optional** und lässt sich jederzeit abschalten.
 
 ## Was kann die App?
 
@@ -37,7 +38,8 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
   Bei **täglichen** Aufgaben und „alle x Tagen“ steht in der Wochenansicht eine Zeile
   je fälligem Wochentag (Mo–So) – jede kann einzeln abgehakt werden.
   „Alle x Wochen“ und „alle x Monate“ heißen: die Aufgabe fällt nur in jedem x-ten
-  Termin auf (Wochen bzw. Monate ab dem Planstart).
+  Termin auf. Der Takt beginnt am 06.01.2020 und läuft in jedem Gerät gleich –
+  dadurch sind sich zwei Geräte ohne Abgleich sicher einig, was fällig ist.
 * **Zuständig je Aufgabe:** Standard ist der Turnus des Raums (wer den Raum hat).
   Man kann eine Aufgabe aber auch **fest einer Person** zuordnen – dann erledigt sie
   diese Person jede Woche, unabhängig vom Raum-Turnus. In der Wochenansicht steht
@@ -63,7 +65,9 @@ Kein Konto, kein Backend, offlinefähig – die Daten liegen auf dem Gerät.
 
 ### Daten zwischen den Handys teilen (ohne Konto)
 
-1. In **Turnus → Plan teilen → Code erzeugen** (oder **Mehr → Daten teilen**) einen Code erzeugen.
+1. In **Turnus → Wochen → Plan teilen** (oder **Mehr → Daten teilen**) einen Code erzeugen.
+   Der Code enthält den Plan, aber **nicht** den WG-Schlüssel – den bekommt die WG
+   getrennt über den Einladungs-Link.
 2. Code per Messenger/Mail verschicken – oder über „Teilen“ direkt aus der App.
 3. Beim anderen: **Code einfügen** → **Prüfen** → **Übernehmen**.
    Beim Zusammenführen bleiben alle Erledigungen erhalten (der neuere Eintrag gewinnt).
@@ -83,8 +87,9 @@ ob der Plan übernommen werden soll.
   nur die Pünktlichkeit trennt „viel gemacht“ von „pünktlich gemacht“.
 * **Abwesenheiten** (Mehr → Abwesenheiten): Urlaub oder Krankheit eintragen. Für diese Wochen
   pausieren die Punkte, damit Fairness und Belohnung nicht verzerrt werden.
-* Die Auswertung bleibt vollständig auf dem Gerät – sie wird nicht an den Server geschickt
-  (außer der normale Live-Sync, der ohnehin nur Chiffretext überträgt).
+* Die Auswertung (Fairness, Pünktlichkeit, Fleißwoche) rechnet ausschließlich auf dem
+  Gerät. Für den Abgleich zwischen den Geräten werden die Erledigungen der vergangenen
+  Wochen zwar hochgeladen – aber verschlüsselt, zusammen mit dem Plan.
 
 ### Druckansicht und PDF
 
@@ -184,7 +189,9 @@ wg-putzplan/
 ├── impressum.html        Impressum (Platzhalter für den Betreiber)
 ├── datenschutz.html      Datenschutzerklärung
 ├── manifest.webmanifest  App-Manifest (Name, Icons, Standalone)
-├── sw.js                 Service Worker (Offline)
+├── sw.js                 Service Worker (Offline + Web Push)
+├── INSTALL.txt           Installationsanleitung für Android und iPhone
+├── qr-license.txt        Lizenztext von qr.js (MIT)
 ├── icons/                Icons 192/512, Maskable, Apple-Touch, Favicon
 └── server-worker.js      Quelltext des Sync-Servers (Cloudflare Worker + R2)
 ```
@@ -219,12 +226,15 @@ teilen sich denselben Stand automatisch.
 * **Weitergeben:** Den WG-Schlüssel den anderen mitteilen (Chat, SMS …). Wer ihn eintippt,
   sieht ab sofort denselben Plan – und Änderungen fließen in beide Richtungen.
 * **Technik:** Ein Cloudflare Worker (`https://wg-putzplan-sync.wg-putzplan.workers.dev`)
-  speichert den Plan in einem R2-Bucket. Die App fragt beim Start und danach alle 30 Sekunden
-  ab, Änderungen werden gebündelt (1,2 s) hochgeladen.
+  speichert den Plan in einem R2-Bucket. Die App fragt beim Start und danach in
+  abstufenden Intervallen ab (30 s → 1 min → 2 min → 5 min; im Hintergrund pausiert
+  die Abfrage), Änderungen werden gebündelt (1,2 s) hochgeladen.
 * **Ende-zu-Ende-Verschlüsselung:** Der Plan wird im Gerät mit AES-GCM verschlüsselt (Schlüssel
   aus dem WG-Schlüssel abgeleitet). Auf dem Server liegt nur Chiffretext – weder Cloudflare noch
   der WG-Schlüssel-Besitzer sieht den Klartext ohne Passphrase. Für Geräte ohne
   WebCrypto-Unterstützung gibt es die Option, unverschlüsselt zu synchronisieren.
+* **Schlüssel sichern:** Unter *Mehr → Schlüssel sichern* gibt es eine eigene Datei mit
+  dem WG-Schlüssel. Weder der geteilte Code noch der JSON-Export enthalten ihn.
 * **Eigene Installation:** Server-Adresse ist frei wählbar (Feld *Server*) – wer keinen
   Cloudflare-Zugang teilen will, trägt dort die eigene Adresse ein.
 

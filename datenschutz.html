@@ -33,8 +33,10 @@
   <a class="btn btn--sm" href="./">← Zurück zur App</a>
   <h1>Datenschutzerklärung</h1>
   <p>Kurz gesagt: Der Putzplan bleibt auf deinem Gerät. Nur wer den Live-Sync
-  bewusst einschaltet, teilt Daten mit der WG – und selbst dann sieht der Server
-  nur Chiffretext.</p>
+  bewusst einschaltet, teilt Daten mit der WG – und bei der empfohlenen
+  Ende-zu-Ende-Verschlüsselung sieht der Server nur Chiffretext. Wer diese
+  Verschlüsselung im Sync-Feld abschaltet, legt den Plan lesbar auf dem Server
+  ab (siehe Abschnitt 3).</p>
 
   <div class="todo">
     <strong>Noch zu prüfen:</strong> Die mit ⟨…⟩ markierten Angaben (Verantwortlicher,
@@ -56,20 +58,26 @@
   <p>Aktivierst du den Live-Sync, werden folgende Daten auf einem Server gespeichert
   (Anbieter: Cloudflare Inc., R2-Speicher, Vereinigte Staaten):</p>
   <table>
-    <tr><td>Plan</td><td>Verschlüsselt (AES-GCM 256, Schlüssel aus dem WG-Schlüssel abgeleitet). Der Server sieht nur Chiffretext.</td></tr>
+    <tr><td>Plan</td><td>Verschlüsselt (AES-GCM 256, Schlüssel aus dem WG-Schlüssel abgeleitet). Der Server sieht nur Chiffretext. <strong>Wichtig:</strong> Die Ende-zu-Ende-Verschlüsselung lässt sich im Sync-Feld abschalten. Dann liegt der Plan für alle, die den WG-Schlüssel haben, lesbar auf dem Server – deshalb ist sie eingeschaltet vorgesehen.</td></tr>
     <tr><td>Inhaltskennung</td><td>HMAC des Planinhalts – nur um zu erkennen, ob sich etwas geändert hat. Kein Rückschluss auf den Inhalt.</td></tr>
     <tr><td>Gerätekennung</td><td>Zufällige Kennung pro Gerät, damit eine Änderung nicht an das auslösende Gerät zurückgeschickt wird.</td></tr>
     <tr><td>Push-Abo</td><td>Endpunkt des Browsers, Schlüssel, Erinnerungsstunde, Zeitzone, Wochentage.</td></tr>
     <tr><td>WG-Schlüssel</td><td>Verlässt das Gerät <strong>nie</strong>. Der Server speichert nur dessen Hash (SHA-256) als Zugangsschlüssel.</td></tr>
   </table>
-  <p class="ok">Nicht gespeichert werden: Namen, Inhalte von Notizen, Aufgabentexte,
-  Punkte, Bestätigungen oder Abwesenheiten – sie stecken ausschließlich im
-  Chiffretext.</p>
+  <p class="ok">Nicht im Klartext gespeichert werden: Namen, Inhalte von Notizen,
+  Aufgabentexte, Punkte, Bestätigungen oder Abwesenheiten – sie stecken ausschließlich
+  im Chiffretext. (Die Auswertung dieser Daten – Fairness, Pünktlichkeit, Fleißwoche –
+  erfolgt auf dem Gerät; zum Abgleich zwischen den Geräten wird auch der
+  verschlüsselte Plan der vergangenen Wochen übertragen.)</p>
+  <p>Geteilte Codes und exportierte JSON-Dateien enthalten <strong>keinen</strong>
+  WG-Schlüssel. Wer den Live-Sync nutzt, sichert den Schlüssel zusätzlich über
+  „Schlüssel sichern“ in den Einstellungen.</p>
 
   <h2>4. Push-Benachrichtigungen</h2>
   <p>Erinnerungen werden über Web Push verschickt. Der Nachrichtentext ist bewusst
-  allgemein gehalten („Der Putzplan wurde geändert“) und enthält keine Aufgaben,
-  Namen oder Zeiten. Die tägliche Erinnerung nennt nur den Termin. Am Ende der
+  allgemein gehalten („Der Putzplan wurde geändert“ bzw. „Zeit für den Putzplan“)
+  und enthält keine Aufgaben, Namen oder Zeiten – auch die tägliche Erinnerung
+  verrät nicht, was ansteht. Am Ende der
   Zustellung landet ein technischer Eintrag beim Push-Dienst des Herstellers
   (Google, Mozilla, Apple oder Microsoft) – wie bei jeder App mit Benachrichtigungen.</p>
 
@@ -106,7 +114,28 @@
   einen <strong>neuen WG-Schlüssel</strong> zu erzeugen – der alte Plan ist dann
   nicht mehr erreichbar. Ansprüche kannst du unter ⟨E-Mail-Adresse⟩ geltend machen.</p>
 
-  <h2>9. SSL-/TLS-Verschlüsselung</h2>
+  <h2>9. Rechtsgrundlage</h2>
+  <p>Verantwortlicher ist der Betreiber dieser App (siehe Impressum). Die Verarbeitung
+  erfolgt auf Grundlage von Art. 6 Abs. 1 lit. b DSGVO (Erfüllung des zwischen den
+  WG-Mitgliedern bestehenden Plans, soweit der Live-Sync genutzt wird) sowie
+  Art. 6 Abs. 1 lit. f DSGVO (Bereitstellung der App und Schutz der Serverressourcen).
+  Die Verarbeitung erfolgt zur Erfüllung des jeweiligen Zwecks, nicht zu Profilbildung.
+  Wer den Live-Sync nicht nutzt, verarbeitet keine Daten auf einem Server.</p>
+
+  <h2>10. Drittlandtransfer</h2>
+  <p>Als Anbieter werden Cloudflare Inc. (R2-Speicher und Worker, Vereinigte Staaten)
+  und GitHub Inc. (GitHub Pages, Vereinigte Staaten) genutzt. Für die Übermittlung in
+  die USA bestehen nach Art. 44 ff. DSGVO angemessene Garantien, insbesondere
+  Rechtsverträge nach Art. 46 Abs. 2 lit. c DSGVO (Standardvertragsklauseln der
+  Europäischen Kommission) sowie die Übermittlung in Rahmen der
+  DORA-Zertifizierung dieser Anbieter.</p>
+
+  <h2>11. Beschwerderecht</h2>
+  <p>Du hast das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren
+  (Art. 77 DSGVO), insbesondere in dem Mitgliedstaat deines Aufenthaltsorts, des
+  mutmaßlichen Verstoßes oder des Ortes des mutmaßlichen Verstoßes.</p>
+
+  <h2>12. SSL-/TLS-Verschlüsselung</h2>
   <p>Die Verbindung zwischen App und Server läuft über HTTPS. Zusätzlich ist der
   Planinhalt Ende-zu-Ende verschlüsselt – auch der Betreiber des Servers kann ihn
   nicht lesen.</p>
